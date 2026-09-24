@@ -9,6 +9,9 @@ Read these in order:
 2. [Quick Start Guide] => (docs/NCP-AIN_AI_FABRIC_PRO_MEGA_LAB_quick_start.pdf)
 3. [Lab Workbook] => (docs/NCP-AIN_AI_FABRIC_PRO_MEGA_LAB_workbook.pdf)
 ```
+## EVE-NG Lab Files
+Folder: ```nvidia_ain_pro_exam_mega_lab```
+
 ## Import into EVE-NG
 
 Pick one topology:
