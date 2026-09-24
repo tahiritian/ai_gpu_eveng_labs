@@ -1,0 +1,29 @@
+BL2 - Cumulus / NVUE startup
+
+Port mapping:
+- swp1 = Ethernet1 -> SPINE1
+- swp2 = Ethernet2 -> SPINE2
+- swp3 = Ethernet10 -> BL1 peer-link member
+- swp4 = Ethernet11 -> BL1 peer-link member
+- swp5 = Ethernet20 -> COLLECTOR
+- swp6 = Ethernet30 -> PE2
+
+Node deltas from BL1:
+- Lo0 10.255.0.12/32
+- Lo1 10.254.0.12/32
+- Lo2 10.254.78.78/32
+- Lo100 100.64.10.12/32
+- peer SVI VLAN4094 = 10.255.78.2/30
+- peer = 10.255.78.1
+- swp1 10.0.0.10/31
+- swp2 10.0.0.22/31
+- swp6 198.51.100.2/31 routed to PE2
+- external neighbor 198.51.100.3 remote-as 65301
+- advertise 100.64.10.12/32
+
+Keep the same VLAN, VRF, VNI, MLAG, and EVPN structure as BL1.
+
+Validation:
+- nv show interface
+- vtysh -c "show bgp summary"
+- vtysh -c "show bgp l2vpn evpn summary"

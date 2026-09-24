@@ -1,0 +1,26 @@
+LEAF4 - Cumulus / NVUE startup
+
+Port mapping:
+- swp1 = Ethernet1 -> SPINE1
+- swp2 = Ethernet2 -> SPINE2
+- swp3 = Ethernet10 -> LEAF3 peer-link member
+- swp4 = Ethernet11 -> LEAF3 peer-link member
+- swp5 = Ethernet20 -> GPU-B
+- swp6 = Ethernet21 -> STORAGE
+
+Node deltas from LEAF3:
+- Lo0 10.255.0.4/32
+- Lo1 10.254.0.4/32
+- Lo2 10.254.34.34/32
+- peer SVI VLAN4094 = 10.255.34.2/30
+- peer = 10.255.34.1
+- swp1 10.0.0.6/31
+- swp2 10.0.0.18/31
+
+Keep the same VLAN, VRF, VNI, bond, and MLAG structure as LEAF3.
+
+Validation:
+- nv show interface
+- nv show mlag
+- vtysh -c "show ip ospf neighbor"
+- vtysh -c "show bgp l2vpn evpn summary"

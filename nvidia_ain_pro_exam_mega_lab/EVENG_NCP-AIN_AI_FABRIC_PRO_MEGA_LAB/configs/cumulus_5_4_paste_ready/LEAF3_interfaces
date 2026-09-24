@@ -1,0 +1,175 @@
+auto lo
+iface lo inet loopback
+    address 10.255.0.3/32
+    address 10.254.0.3/32
+    address 10.254.34.34/32
+    vxlan-local-tunnelip 10.254.0.3
+    clagd-vxlan-anycast-ip 10.254.34.34
+
+auto mgmt
+iface mgmt
+    vrf-table auto
+
+auto eth0
+iface eth0 inet dhcp
+    vrf mgmt
+    ip-forward off
+    ip6-forward off
+
+auto AI_FABRIC
+iface AI_FABRIC
+    vrf-table auto
+
+auto AI_SERVICES
+iface AI_SERVICES
+    vrf-table auto
+
+auto TENANT_B
+iface TENANT_B
+    vrf-table auto
+
+auto swp1
+iface swp1
+    mtu 9214
+    address 10.0.0.4/31
+
+auto swp2
+iface swp2
+    mtu 9214
+    address 10.0.0.16/31
+
+auto swp3
+iface swp3
+    mtu 9214
+
+auto swp4
+iface swp4
+    mtu 9214
+
+auto swp5
+iface swp5
+    mtu 9214
+
+auto swp6
+iface swp6
+    mtu 9214
+
+auto bond20
+iface bond20
+    bond-slaves swp5
+    bond-mode 802.3ad
+    bond-miimon 100
+    bond-min-links 1
+    bond-lacp-rate 1
+    clag-id 20
+    bridge-access 110
+    mtu 9214
+
+auto bond21
+iface bond21
+    bond-slaves swp6
+    bond-mode 802.3ad
+    bond-miimon 100
+    bond-min-links 1
+    bond-lacp-rate 1
+    clag-id 21
+    bridge-access 120
+    mtu 9214
+
+auto peerlink
+iface peerlink
+    bond-slaves swp3 swp4
+    bond-mode 802.3ad
+    bond-miimon 100
+    bond-min-links 1
+    bond-lacp-rate 1
+    bridge-learning off
+    bridge-vids 110 120 130 210 4094
+    mtu 9214
+
+auto peerlink.4094
+iface peerlink.4094
+    address 10.255.34.1/30
+    clagd-backup-ip 10.255.0.4
+    clagd-peer-ip linklocal
+    clagd-sys-mac 44:38:39:be:ef:02
+    clagd-args --initDelay 100
+
+auto vxlan0
+iface vxlan0
+    bridge-vlan-vni-map 110=10110 120=10120 130=10130 210=10210
+    bridge-vids 110 120 130 210
+    bridge-learning off
+
+auto br_default
+iface br_default
+    bridge-ports bond20 bond21 peerlink vxlan0
+    bridge-vlan-aware yes
+    bridge-vids 110 120 130 210 4094
+    bridge-pvid 1
+
+auto vlan110
+iface vlan110
+    address 172.16.110.4/24
+    address 2001:db8:110::4/64
+    address-virtual 00:00:5e:00:01:aa 172.16.110.1/24 2001:db8:110::1/64
+    vrf AI_FABRIC
+    vlan-raw-device br_default
+    vlan-id 110
+
+auto vlan120
+iface vlan120
+    address 172.16.120.4/24
+    address 2001:db8:120::4/64
+    address-virtual 00:00:5e:00:01:aa 172.16.120.1/24 2001:db8:120::1/64
+    vrf AI_FABRIC
+    vlan-raw-device br_default
+    vlan-id 120
+
+auto vlan130
+iface vlan130
+    address 172.16.130.4/24
+    address 2001:db8:130::4/64
+    address-virtual 00:00:5e:00:01:aa 172.16.130.1/24 2001:db8:130::1/64
+    vrf AI_SERVICES
+    vlan-raw-device br_default
+    vlan-id 130
+
+auto vlan210
+iface vlan210
+    address 172.16.210.4/24
+    address 2001:db8:210::4/64
+    address-virtual 00:00:5e:00:01:aa 172.16.210.1/24 2001:db8:210::1/64
+    vrf TENANT_B
+    vlan-raw-device br_default
+    vlan-id 210
+
+auto vlan5110_l3
+iface vlan5110_l3
+    vrf AI_FABRIC
+    vlan-raw-device br_l3vni
+    vlan-id 5110
+
+auto vlan5130_l3
+iface vlan5130_l3
+    vrf AI_SERVICES
+    vlan-raw-device br_l3vni
+    vlan-id 5130
+
+auto vlan5210_l3
+iface vlan5210_l3
+    vrf TENANT_B
+    vlan-raw-device br_l3vni
+    vlan-id 5210
+
+auto vxlan_l3
+iface vxlan_l3
+    bridge-vlan-vni-map 5110=50110 5130=50130 5210=50210
+    bridge-vids 5110 5130 5210
+    bridge-learning off
+
+auto br_l3vni
+iface br_l3vni
+    bridge-ports vxlan_l3
+    bridge-vlan-aware yes
+    bridge-vids 5110 5130 5210

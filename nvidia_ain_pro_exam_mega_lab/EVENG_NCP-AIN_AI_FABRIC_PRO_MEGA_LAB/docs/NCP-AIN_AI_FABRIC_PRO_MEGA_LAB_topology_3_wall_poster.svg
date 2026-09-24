@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="2600" height="1700" preserveAspectRatio="xMinYMin meet" viewBox="0 0 2600 1700" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="2600" height="1700"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-1700)" style="clip-path: url(#clip)">
+		<g transform="">
+			<rect x="0" y="0" width="2600" height="1700" style="stroke: rgb(84%,89%,91%); stroke-linecap: butt; stroke-width: 1; fill: rgb(96%,98%,98%); fill-rule: evenodd;"/>
+			<text x="832.415" y="1650" style="font-family: Helvetica-Bold; font-size: 34px;fill: rgb(8%,19%,30%); stroke:none;" transform="translate(0,3300) scale(1,-1)">NCP-AIN AI Fabric Pro Mega Lab - Topology 3 Wall Poster</text>
+			<text x="983.856" y="1618" style="font-family: Helvetica; font-size: 16px;fill: rgb(32%,38%,42%); stroke:none;" transform="translate(0,3236) scale(1,-1)">Large-format Fabric and Host / Edge zones with bigger labels for printing and tablet study</text>
+			<rect x="40" y="760" width="2520" height="780" rx="18" ry="18" style="stroke: rgb(78%,83%,87%); stroke-linecap: butt; stroke-width: 1.2; fill: rgb(93%,96%,97%); fill-rule: evenodd;"/>
+			<text x="64" y="1506" style="font-family: Helvetica-Bold; font-size: 26px;fill: rgb(9%,19%,30%); stroke:none;" transform="translate(0,3012) scale(1,-1)">Fabric Zone</text>
+			<text x="64" y="1480" style="font-family: Helvetica; font-size: 14px;fill: rgb(31%,37%,43%); stroke:none;" transform="translate(0,2960) scale(1,-1)">Control plane, underlay /31 fanout, EVPN/VXLAN roles, and border connectivity</text>
+			<rect x="40" y="40" width="2520" height="650" rx="18" ry="18" style="stroke: rgb(78%,83%,87%); stroke-linecap: butt; stroke-width: 1.2; fill: rgb(99%,97%,92%); fill-rule: evenodd;"/>
+			<text x="64" y="656" style="font-family: Helvetica-Bold; font-size: 26px;fill: rgb(9%,19%,30%); stroke:none;" transform="translate(0,1312) scale(1,-1)">Host / Edge Zone</text>
+			<text x="64" y="630" style="font-family: Helvetica; font-size: 14px;fill: rgb(31%,37%,43%); stroke:none;" transform="translate(0,1260) scale(1,-1)">Ubuntu VM endpoints, MLAG host attachment, dual-stack tenant services, and external edge mapping</text>
+			<rect x="980" y="1360" width="190" height="96" rx="12" ry="12" style="stroke: rgb(36%,41%,45%); stroke-linecap: butt; stroke-width: 1.4; fill: rgb(15%,29%,46%); fill-rule: evenodd;"/>
+			<text x="1055.0" y="1432" style="font-family: Helvetica-Bold; font-size: 20px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2864) scale(1,-1)">RR1</text>
+			<text x="990" y="1406" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2812) scale(1,-1)">Lo0 10.255.255.11</text>
+			<text x="990" y="1388" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2776) scale(1,-1)">Lo0v6 2001:db8:ffff:11::11</text>
+			<rect x="1210" y="1360" width="190" height="96" rx="12" ry="12" style="stroke: rgb(36%,41%,45%); stroke-linecap: butt; stroke-width: 1.4; fill: rgb(15%,29%,46%); fill-rule: evenodd;"/>
+			<text x="1285.0" y="1432" style="font-family: Helvetica-Bold; font-size: 20px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2864) scale(1,-1)">RR2</text>
+			<text x="1220" y="1406" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2812) scale(1,-1)">Lo0 10.255.255.12</text>
+			<text x="1220" y="1388" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2776) scale(1,-1)">Lo0v6 2001:db8:ffff:12::12</text>
+			<rect x="760" y="1130" width="290" height="145" rx="12" ry="12" style="stroke: rgb(36%,41%,45%); stroke-linecap: butt; stroke-width: 1.4; fill: rgb(37%,58%,72%); fill-rule: evenodd;"/>
+			<text x="865.873" y="1251" style="font-family: Helvetica-Bold; font-size: 22px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,2502) scale(1,-1)">SPINE1</text>
+			<text x="770" y="1225" style="font-family: Helvetica; font-size: 13px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,2450) scale(1,-1)">Lo0 10.255.255.101</text>
+			<text x="770" y="1206" style="font-family: Helvetica; font-size: 13px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,2412) scale(1,-1)">E1-E6 /31 underlay fanout</text>
+			<text x="770" y="1187" style="font-family: Helvetica; font-size: 13px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,2374) scale(1,-1)">E10-E11 RR uplinks</text>
+			<rect x="1330" y="1130" width="290" height="145" rx="12" ry="12" style="stroke: rgb(36%,41%,45%); stroke-linecap: butt; stroke-width: 1.4; fill: rgb(37%,58%,72%); fill-rule: evenodd;"/>
+			<text x="1435.873" y="1251" style="font-family: Helvetica-Bold; font-size: 22px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,2502) scale(1,-1)">SPINE2</text>
+			<text x="1340" y="1225" style="font-family: Helvetica; font-size: 13px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,2450) scale(1,-1)">Lo0 10.255.255.102</text>
+			<text x="1340" y="1206" style="font-family: Helvetica; font-size: 13px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,2412) scale(1,-1)">E1-E6 /31 underlay fanout</text>
+			<text x="1340" y="1187" style="font-family: Helvetica; font-size: 13px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,2374) scale(1,-1)">E10-E11 RR uplinks</text>
+			<rect x="390" y="860" width="220" height="170" rx="12" ry="12" style="stroke: rgb(36%,41%,45%); stroke-linecap: butt; stroke-width: 1.4; fill: rgb(30%,56%,55%); fill-rule: evenodd;"/>
+			<text x="468.33" y="1006" style="font-family: Helvetica-Bold; font-size: 20px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2012) scale(1,-1)">LEAF1</text>
+			<text x="400" y="980" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1960) scale(1,-1)">Lo0 10.255.0.1</text>
+			<text x="400" y="962" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1924) scale(1,-1)">Lo1 10.254.0.1</text>
+			<text x="400" y="944" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1888) scale(1,-1)">Lo2 10.254.12.12</text>
+			<text x="400" y="926" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1852) scale(1,-1)">GPU-A VLAN110</text>
+			<text x="400" y="908" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1816) scale(1,-1)">GPU-C VLAN210</text>
+			<rect x="680" y="860" width="220" height="170" rx="12" ry="12" style="stroke: rgb(36%,41%,45%); stroke-linecap: butt; stroke-width: 1.4; fill: rgb(30%,56%,55%); fill-rule: evenodd;"/>
+			<text x="758.33" y="1006" style="font-family: Helvetica-Bold; font-size: 20px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2012) scale(1,-1)">LEAF2</text>
+			<text x="690" y="980" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1960) scale(1,-1)">Lo0 10.255.0.2</text>
+			<text x="690" y="962" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1924) scale(1,-1)">Lo1 10.254.0.2</text>
+			<text x="690" y="944" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1888) scale(1,-1)">Lo2 10.254.12.12</text>
+			<text x="690" y="926" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1852) scale(1,-1)">GPU-A VLAN110</text>
+			<text x="690" y="908" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1816) scale(1,-1)">GPU-C VLAN210</text>
+			<rect x="970" y="860" width="220" height="170" rx="12" ry="12" style="stroke: rgb(36%,41%,45%); stroke-linecap: butt; stroke-width: 1.4; fill: rgb(30%,56%,55%); fill-rule: evenodd;"/>
+			<text x="1048.33" y="1006" style="font-family: Helvetica-Bold; font-size: 20px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2012) scale(1,-1)">LEAF3</text>
+			<text x="980" y="980" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1960) scale(1,-1)">Lo0 10.255.0.3</text>
+			<text x="980" y="962" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1924) scale(1,-1)">Lo1 10.254.0.3</text>
+			<text x="980" y="944" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1888) scale(1,-1)">Lo2 10.254.34.34</text>
+			<text x="980" y="926" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1852) scale(1,-1)">GPU-B VLAN110</text>
+			<text x="980" y="908" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1816) scale(1,-1)">STORAGE VLAN120</text>
+			<rect x="1260" y="860" width="220" height="170" rx="12" ry="12" style="stroke: rgb(36%,41%,45%); stroke-linecap: butt; stroke-width: 1.4; fill: rgb(30%,56%,55%); fill-rule: evenodd;"/>
+			<text x="1338.33" y="1006" style="font-family: Helvetica-Bold; font-size: 20px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2012) scale(1,-1)">LEAF4</text>
+			<text x="1270" y="980" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1960) scale(1,-1)">Lo0 10.255.0.4</text>
+			<text x="1270" y="962" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1924) scale(1,-1)">Lo1 10.254.0.4</text>
+			<text x="1270" y="944" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1888) scale(1,-1)">Lo2 10.254.34.34</text>
+			<text x="1270" y="926" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1852) scale(1,-1)">GPU-B VLAN110</text>
+			<text x="1270" y="908" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1816) scale(1,-1)">STORAGE VLAN120</text>
+			<rect x="1630" y="840" width="320" height="190" rx="12" ry="12" style="stroke: rgb(36%,41%,45%); stroke-linecap: butt; stroke-width: 1.4; fill: rgb(55%,35%,59%); fill-rule: evenodd;"/>
+			<text x="1739.268" y="1006" style="font-family: Helvetica-Bold; font-size: 22px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2012) scale(1,-1)">BL1 / BL2</text>
+			<text x="1640" y="980" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1960) scale(1,-1)">Border MLAG pair</text>
+			<text x="1640" y="962" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1924) scale(1,-1)">BL1 Lo100 100.64.10.11</text>
+			<text x="1640" y="944" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1888) scale(1,-1)">BL2 Lo100 100.64.10.12</text>
+			<text x="1640" y="926" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1852) scale(1,-1)">Collector VLAN130</text>
+			<text x="1640" y="908" style="font-family: Helvetica; font-size: 12px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,1816) scale(1,-1)">eBGP to PE1 / PE2</text>
+			<rect x="1840" y="1210" width="170" height="95" rx="12" ry="12" style="stroke: rgb(36%,41%,45%); stroke-linecap: butt; stroke-width: 1.4; fill: rgb(73%,27%,28%); fill-rule: evenodd;"/>
+			<text x="1907.99" y="1281" style="font-family: Helvetica-Bold; font-size: 18px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2562) scale(1,-1)">PE1</text>
+			<text x="1850" y="1255" style="font-family: Helvetica; font-size: 11px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2510) scale(1,-1)">E1 198.51.100.1/31</text>
+			<text x="1850" y="1238" style="font-family: Helvetica; font-size: 11px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2476) scale(1,-1)">to BL1</text>
+			<rect x="2060" y="1200" width="190" height="115" rx="12" ry="12" style="stroke: rgb(36%,41%,45%); stroke-linecap: butt; stroke-width: 1.4; fill: rgb(73%,27%,28%); fill-rule: evenodd;"/>
+			<text x="2137.99" y="1291" style="font-family: Helvetica-Bold; font-size: 18px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2582) scale(1,-1)">PE2</text>
+			<text x="2070" y="1265" style="font-family: Helvetica; font-size: 11px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2530) scale(1,-1)">E1 198.51.100.3/31</text>
+			<text x="2070" y="1248" style="font-family: Helvetica; font-size: 11px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2496) scale(1,-1)">E2 198.51.100.5/31</text>
+			<text x="2070" y="1231" style="font-family: Helvetica; font-size: 11px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2462) scale(1,-1)">E3 198.51.100.6/31</text>
+			<rect x="2060" y="1010" width="210" height="95" rx="12" ry="12" style="stroke: rgb(36%,41%,45%); stroke-linecap: butt; stroke-width: 1.4; fill: rgb(73%,27%,28%); fill-rule: evenodd;"/>
+			<text x="2110.505" y="1081" style="font-family: Helvetica-Bold; font-size: 18px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2162) scale(1,-1)">REMOTE-DC</text>
+			<text x="2070" y="1055" style="font-family: Helvetica; font-size: 11px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2110) scale(1,-1)">Lo100 203.0.113.10/32</text>
+			<text x="2070" y="1038" style="font-family: Helvetica; font-size: 11px;fill: rgb(100%,100%,100%); stroke:none;" transform="translate(0,2076) scale(1,-1)">Lo100v6 2001:db8:203:113::10</text>
+			<path d="M 1075,1360 L 905,1275 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 1305,1360 L 1475,1275 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 980,1360 L 840,1275 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 1400,1360 L 1545,1275 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 905,1130 L 500,1030 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 905,1130 L 790,1030 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 905,1130 L 1080,1030 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 905,1130 L 1370,1030 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 905,1130 L 1790,1030 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 1475,1130 L 500,1030 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 1475,1130 L 790,1030 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 1475,1130 L 1080,1030 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 1475,1130 L 1370,1030 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 1475,1130 L 1790,1030 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 1790,1030 L 1925,1210 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 1840,935 L 2155,1200 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 2155,1200 L 2165,1105 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<rect x="290" y="360" width="240" height="145" rx="12" ry="12" style="stroke: rgb(36%,41%,45%); stroke-linecap: butt; stroke-width: 1.4; fill: rgb(91%,76%,41%); fill-rule: evenodd;"/>
+			<text x="377.78" y="481" style="font-family: Helvetica-Bold; font-size: 20px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,962) scale(1,-1)">GPU-A</text>
+			<text x="300" y="455" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,910) scale(1,-1)">Ubuntu VM</text>
+			<text x="300" y="437" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,874) scale(1,-1)">bond0 172.16.110.11</text>
+			<text x="300" y="419" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,838) scale(1,-1)">bond0v6 2001:db8:110::11</text>
+			<text x="300" y="401" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,802) scale(1,-1)">MLAG Po10 on LEAF1/2</text>
+			<rect x="620" y="360" width="240" height="145" rx="12" ry="12" style="stroke: rgb(36%,41%,45%); stroke-linecap: butt; stroke-width: 1.4; fill: rgb(91%,76%,41%); fill-rule: evenodd;"/>
+			<text x="707.78" y="481" style="font-family: Helvetica-Bold; font-size: 20px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,962) scale(1,-1)">GPU-C</text>
+			<text x="630" y="455" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,910) scale(1,-1)">Ubuntu VM</text>
+			<text x="630" y="437" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,874) scale(1,-1)">bond0 172.16.210.21</text>
+			<text x="630" y="419" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,838) scale(1,-1)">bond0v6 2001:db8:210::21</text>
+			<text x="630" y="401" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,802) scale(1,-1)">MLAG Po11 on LEAF1/2</text>
+			<rect x="950" y="360" width="240" height="145" rx="12" ry="12" style="stroke: rgb(36%,41%,45%); stroke-linecap: butt; stroke-width: 1.4; fill: rgb(91%,76%,41%); fill-rule: evenodd;"/>
+			<text x="1037.78" y="481" style="font-family: Helvetica-Bold; font-size: 20px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,962) scale(1,-1)">GPU-B</text>
+			<text x="960" y="455" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,910) scale(1,-1)">Ubuntu VM</text>
+			<text x="960" y="437" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,874) scale(1,-1)">bond0 172.16.110.12</text>
+			<text x="960" y="419" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,838) scale(1,-1)">bond0v6 2001:db8:110::12</text>
+			<text x="960" y="401" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,802) scale(1,-1)">MLAG Po20 on LEAF3/4</text>
+			<rect x="1280" y="360" width="240" height="145" rx="12" ry="12" style="stroke: rgb(36%,41%,45%); stroke-linecap: butt; stroke-width: 1.4; fill: rgb(91%,76%,41%); fill-rule: evenodd;"/>
+			<text x="1350.55" y="481" style="font-family: Helvetica-Bold; font-size: 20px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,962) scale(1,-1)">STORAGE</text>
+			<text x="1290" y="455" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,910) scale(1,-1)">Ubuntu VM</text>
+			<text x="1290" y="437" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,874) scale(1,-1)">bond0 172.16.120.50</text>
+			<text x="1290" y="419" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,838) scale(1,-1)">bond0v6 2001:db8:120::50</text>
+			<text x="1290" y="401" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,802) scale(1,-1)">MLAG Po21 on LEAF3/4</text>
+			<rect x="1680" y="335" width="290" height="170" rx="12" ry="12" style="stroke: rgb(36%,41%,45%); stroke-linecap: butt; stroke-width: 1.4; fill: rgb(91%,76%,41%); fill-rule: evenodd;"/>
+			<text x="1762.78" y="481" style="font-family: Helvetica-Bold; font-size: 20px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,962) scale(1,-1)">COLLECTOR</text>
+			<text x="1690" y="455" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,910) scale(1,-1)">Ubuntu VM</text>
+			<text x="1690" y="437" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,874) scale(1,-1)">bond0 172.16.130.50</text>
+			<text x="1690" y="419" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,838) scale(1,-1)">bond0v6 2001:db8:130::50</text>
+			<text x="1690" y="401" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,802) scale(1,-1)">MLAG Po30 on BL1/BL2</text>
+			<text x="1690" y="383" style="font-family: Helvetica; font-size: 12px;fill: rgb(0%,0%,0%); stroke:none;" transform="translate(0,766) scale(1,-1)">Ops / service endpoint</text>
+			<path d="M 500,860 L 410,505 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 790,860 L 740,505 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 1080,860 L 1070,505 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 1370,860 L 1400,505 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<path d="M 1790,840 L 1825,505 Z" style="stroke: rgb(48%,56%,63%); stroke-linecap: butt; stroke-width: 2.0;"/>
+			<text x="80" y="1480" style="font-family: Helvetica-Bold; font-size: 22px;fill: rgb(9%,19%,30%); stroke:none;" transform="translate(0,2960) scale(1,-1)">Underlay /31 Mapping</text>
+			<text x="80" y="1456" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,2912) scale(1,-1)">LEAF1 E1 10.0.0.0/31  &lt;-&gt; SPINE1 E1 10.0.0.1/31</text>
+			<text x="80" y="1436" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,2872) scale(1,-1)">LEAF1 E2 10.0.0.12/31 &lt;-&gt; SPINE2 E1 10.0.0.13/31</text>
+			<text x="80" y="1416" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,2832) scale(1,-1)">LEAF2 E1 10.0.0.2/31  &lt;-&gt; SPINE1 E2 10.0.0.3/31</text>
+			<text x="80" y="1396" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,2792) scale(1,-1)">LEAF2 E2 10.0.0.14/31 &lt;-&gt; SPINE2 E2 10.0.0.15/31</text>
+			<text x="80" y="1376" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,2752) scale(1,-1)">LEAF3 E1 10.0.0.4/31  &lt;-&gt; SPINE1 E3 10.0.0.5/31</text>
+			<text x="80" y="1356" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,2712) scale(1,-1)">LEAF3 E2 10.0.0.16/31 &lt;-&gt; SPINE2 E3 10.0.0.17/31</text>
+			<text x="80" y="1336" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,2672) scale(1,-1)">LEAF4 E1 10.0.0.6/31  &lt;-&gt; SPINE1 E4 10.0.0.7/31</text>
+			<text x="80" y="1316" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,2632) scale(1,-1)">LEAF4 E2 10.0.0.18/31 &lt;-&gt; SPINE2 E4 10.0.0.19/31</text>
+			<text x="80" y="1296" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,2592) scale(1,-1)">BL1 E1 10.0.0.8/31   &lt;-&gt; SPINE1 E5 10.0.0.9/31</text>
+			<text x="80" y="1276" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,2552) scale(1,-1)">BL1 E2 10.0.0.20/31  &lt;-&gt; SPINE2 E5 10.0.0.21/31</text>
+			<text x="80" y="1256" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,2512) scale(1,-1)">BL2 E1 10.0.0.10/31  &lt;-&gt; SPINE1 E6 10.0.0.11/31</text>
+			<text x="80" y="1236" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,2472) scale(1,-1)">BL2 E2 10.0.0.22/31  &lt;-&gt; SPINE2 E6 10.0.0.23/31</text>
+			<text x="80" y="1216" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,2432) scale(1,-1)">RR1 E1 10.0.100.1/31 &lt;-&gt; SPINE1 E10 10.0.100.0/31</text>
+			<text x="80" y="1196" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,2392) scale(1,-1)">RR1 E2 10.0.100.3/31 &lt;-&gt; SPINE2 E10 10.0.100.2/31</text>
+			<text x="80" y="1176" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,2352) scale(1,-1)">RR2 E1 10.0.100.5/31 &lt;-&gt; SPINE1 E11 10.0.100.4/31</text>
+			<text x="80" y="1156" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,2312) scale(1,-1)">RR2 E2 10.0.100.7/31 &lt;-&gt; SPINE2 E11 10.0.100.6/31</text>
+			<text x="80" y="1020" style="font-family: Helvetica-Bold; font-size: 22px;fill: rgb(9%,19%,30%); stroke:none;" transform="translate(0,2040) scale(1,-1)">Fabric Role Notes</text>
+			<text x="80" y="996" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1992) scale(1,-1)">RR1/RR2: EVPN route reflectors with dedicated /31 uplinks to both spines</text>
+			<text x="80" y="976" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1952) scale(1,-1)">SPINE1/SPINE2: underlay transit and RR fanout; no tenant gateways</text>
+			<text x="80" y="956" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1912) scale(1,-1)">LEAF1/2: POD1 MLAG pair serving GPU-A and GPU-C dual-homed Ubuntu VMs</text>
+			<text x="80" y="936" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1872) scale(1,-1)">LEAF3/4: POD2 MLAG pair serving GPU-B and STORAGE dual-homed Ubuntu VMs</text>
+			<text x="80" y="916" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1832) scale(1,-1)">BL1/BL2: border MLAG pair for services VLAN130, collector access, and eBGP edge</text>
+			<text x="80" y="620" style="font-family: Helvetica-Bold; font-size: 22px;fill: rgb(9%,19%,30%); stroke:none;" transform="translate(0,1240) scale(1,-1)">Host Attachment Mapping</text>
+			<text x="80" y="596" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1192) scale(1,-1)">GPU-A eth0 -&gt; LEAF1 E20 | eth1 -&gt; LEAF2 E20 | Port-Channel10 | VLAN110</text>
+			<text x="80" y="576" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1152) scale(1,-1)">GPU-C eth0 -&gt; LEAF1 E21 | eth1 -&gt; LEAF2 E21 | Port-Channel11 | VLAN210</text>
+			<text x="80" y="556" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1112) scale(1,-1)">GPU-B eth0 -&gt; LEAF3 E20 | eth1 -&gt; LEAF4 E20 | Port-Channel20 | VLAN110</text>
+			<text x="80" y="536" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1072) scale(1,-1)">STORAGE eth0 -&gt; LEAF3 E21 | eth1 -&gt; LEAF4 E21 | Port-Channel21 | VLAN120</text>
+			<text x="80" y="516" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1032) scale(1,-1)">COLLECTOR eth0 -&gt; BL1 E20 | eth1 -&gt; BL2 E20 | Port-Channel30 | VLAN130</text>
+			<text x="80" y="496" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,992) scale(1,-1)">Peer-links: LEAF1/2 E10-E11, LEAF3/4 E10-E11, BL1/2 E10-E11 -&gt; Port-Channel100</text>
+			<text x="1820" y="760" style="font-family: Helvetica-Bold; font-size: 22px;fill: rgb(9%,19%,30%); stroke:none;" transform="translate(0,1520) scale(1,-1)">Loopback / VTEP Mapping</text>
+			<text x="1820" y="736" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1472) scale(1,-1)">POD1 shared VTEP: LEAF1 Lo2 + LEAF2 Lo2 = 10.254.12.12</text>
+			<text x="1820" y="716" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1432) scale(1,-1)">POD2 shared VTEP: LEAF3 Lo2 + LEAF4 Lo2 = 10.254.34.34</text>
+			<text x="1820" y="696" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1392) scale(1,-1)">BORDER shared VTEP: BL1 Lo2 + BL2 Lo2 = 10.254.78.78</text>
+			<text x="1820" y="676" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1352) scale(1,-1)">LEAF1 Lo1 10.254.0.1 | LEAF2 Lo1 10.254.0.2</text>
+			<text x="1820" y="656" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1312) scale(1,-1)">LEAF3 Lo1 10.254.0.3 | LEAF4 Lo1 10.254.0.4</text>
+			<text x="1820" y="636" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1272) scale(1,-1)">BL1 Lo1 10.254.0.11 | BL2 Lo1 10.254.0.12</text>
+			<text x="1820" y="560" style="font-family: Helvetica-Bold; font-size: 22px;fill: rgb(9%,19%,30%); stroke:none;" transform="translate(0,1120) scale(1,-1)">External Edge Mapping</text>
+			<text x="1820" y="536" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1072) scale(1,-1)">BL1 E30 198.51.100.0/31 -&gt; PE1 E1 198.51.100.1/31</text>
+			<text x="1820" y="516" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,1032) scale(1,-1)">BL2 E30 198.51.100.2/31 -&gt; PE2 E1 198.51.100.3/31</text>
+			<text x="1820" y="496" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,992) scale(1,-1)">PE1 E2 198.51.100.4/31 -&gt; PE2 E2 198.51.100.5/31</text>
+			<text x="1820" y="476" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,952) scale(1,-1)">PE2 E3 198.51.100.6/31 -&gt; REMOTE E1 198.51.100.7/31</text>
+			<text x="1820" y="456" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,912) scale(1,-1)">REMOTE Lo100 203.0.113.10/32 | Lo100v6 2001:db8:203:113::10/128</text>
+			<text x="1820" y="280" style="font-family: Helvetica-Bold; font-size: 22px;fill: rgb(9%,19%,30%); stroke:none;" transform="translate(0,560) scale(1,-1)">Dual-Stack VLAN / VNI / Gateway Mapping</text>
+			<text x="1820" y="256" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,512) scale(1,-1)">VLAN110 -&gt; VNI10110 -&gt; VRF AI_FABRIC</text>
+			<text x="1820" y="236" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,472) scale(1,-1)">172.16.110.0/24 GW 172.16.110.1 | 2001:db8:110::/64 GW 2001:db8:110::1</text>
+			<text x="1820" y="216" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,432) scale(1,-1)">VLAN120 -&gt; VNI10120 -&gt; VRF AI_FABRIC</text>
+			<text x="1820" y="196" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,392) scale(1,-1)">172.16.120.0/24 GW 172.16.120.1 | 2001:db8:120::/64 GW 2001:db8:120::1</text>
+			<text x="1820" y="176" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,352) scale(1,-1)">VLAN130 -&gt; VNI10130 -&gt; VRF AI_SERVICES</text>
+			<text x="1820" y="156" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,312) scale(1,-1)">172.16.130.0/24 GW 172.16.130.1 | 2001:db8:130::/64 GW 2001:db8:130::1</text>
+			<text x="1820" y="136" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,272) scale(1,-1)">VLAN210 -&gt; VNI10210 -&gt; VRF TENANT_B</text>
+			<text x="1820" y="116" style="font-family: Helvetica; font-size: 14px;fill: rgb(14%,21%,27%); stroke:none;" transform="translate(0,232) scale(1,-1)">172.16.210.0/24 GW 172.16.210.1 | 2001:db8:210::/64 GW 2001:db8:210::1</text>
+		</g>
+	</g>
+</svg>

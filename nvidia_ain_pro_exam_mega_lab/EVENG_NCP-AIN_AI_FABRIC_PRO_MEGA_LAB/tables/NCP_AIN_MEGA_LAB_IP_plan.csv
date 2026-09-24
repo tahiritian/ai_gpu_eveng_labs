@@ -1,0 +1,21 @@
+Device,Interface,IP,Purpose
+LEAF1,Loopback0,10.255.0.1/32,router-id
+LEAF1,Loopback1,10.254.0.1/32,VTEP
+LEAF1,Loopback2,10.254.12.12/32,POD1 virtual VTEP
+LEAF2,Loopback2,10.254.12.12/32,POD1 virtual VTEP
+LEAF3,Loopback2,10.254.34.34/32,POD2 virtual VTEP
+LEAF4,Loopback2,10.254.34.34/32,POD2 virtual VTEP
+BL1,Loopback2,10.254.78.78/32,Border virtual VTEP
+BL2,Loopback2,10.254.78.78/32,Border virtual VTEP
+GPU-A,bond0,172.16.110.11/24,Ubuntu worker VM
+GPU-A,bond0-v6,2001:db8:110::11/64,Ubuntu worker VM IPv6
+GPU-B,bond0,172.16.110.12/24,Ubuntu worker VM
+GPU-B,bond0-v6,2001:db8:110::12/64,Ubuntu worker VM IPv6
+GPU-C,bond0,172.16.210.21/24,Ubuntu worker VM
+GPU-C,bond0-v6,2001:db8:210::21/64,Ubuntu worker VM IPv6
+STORAGE,bond0,172.16.120.50/24,Ubuntu storage VM
+STORAGE,bond0-v6,2001:db8:120::50/64,Ubuntu storage VM IPv6
+COLLECTOR,bond0,172.16.130.50/24,Ubuntu services VM
+COLLECTOR,bond0-v6,2001:db8:130::50/64,Ubuntu services VM IPv6
+REMOTE-DC,Loopback100,203.0.113.10/32,Remote service IP
+REMOTE-DC,Loopback100-v6,2001:db8:203:113::10/128,Remote service IPv6

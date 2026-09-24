@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<lab name="NCP-AIN AI Fabric Pro Mega Lab - Mixed EOS Cumulus" id="0" version="1" scripttimeout="300" lock="0">
+  <topology>
+    <nodes>
+      <node id="1" name="RR1" type="qemu" template="veos" image="veos-lab" ethernet="24" console="telnet" delay="0" icon="Router.png" left="560" top="40" uuid="f0043b9f-3cd2-4280-b7d0-586ea0d4aa4c" config="0">
+        <interface id="0" name="Ethernet1" type="ethernet" network_id="13"/>
+        <interface id="1" name="Ethernet2" type="ethernet" network_id="14"/>
+      </node>
+      <node id="2" name="RR2" type="qemu" template="veos" image="veos-lab" ethernet="24" console="telnet" delay="0" icon="Router.png" left="760" top="40" uuid="dde47795-d52f-4417-a3fa-f975c11d8dac" config="0">
+        <interface id="0" name="Ethernet1" type="ethernet" network_id="15"/>
+        <interface id="1" name="Ethernet2" type="ethernet" network_id="16"/>
+      </node>
+      <node id="3" name="SPINE1" type="qemu" template="veos" image="veos-lab" ethernet="24" console="telnet" delay="0" icon="Router.png" left="380" top="180" uuid="5594965d-ca09-4dfb-b549-70bdf392f816" config="0">
+        <interface id="0" name="Ethernet1" type="ethernet" network_id="1"/>
+        <interface id="1" name="Ethernet2" type="ethernet" network_id="3"/>
+        <interface id="2" name="Ethernet3" type="ethernet" network_id="5"/>
+        <interface id="3" name="Ethernet4" type="ethernet" network_id="7"/>
+        <interface id="4" name="Ethernet5" type="ethernet" network_id="9"/>
+        <interface id="5" name="Ethernet6" type="ethernet" network_id="11"/>
+        <interface id="6" name="Ethernet10" type="ethernet" network_id="13"/>
+        <interface id="7" name="Ethernet11" type="ethernet" network_id="15"/>
+      </node>
+      <node id="4" name="SPINE2" type="qemu" template="veos" image="veos-lab" ethernet="24" console="telnet" delay="0" icon="Router.png" left="900" top="180" uuid="4b2e5431-d6f3-4d78-910f-1506e9f13218" config="0">
+        <interface id="0" name="Ethernet1" type="ethernet" network_id="2"/>
+        <interface id="1" name="Ethernet2" type="ethernet" network_id="4"/>
+        <interface id="2" name="Ethernet3" type="ethernet" network_id="6"/>
+        <interface id="3" name="Ethernet4" type="ethernet" network_id="8"/>
+        <interface id="4" name="Ethernet5" type="ethernet" network_id="10"/>
+        <interface id="5" name="Ethernet6" type="ethernet" network_id="12"/>
+        <interface id="6" name="Ethernet10" type="ethernet" network_id="14"/>
+        <interface id="7" name="Ethernet11" type="ethernet" network_id="16"/>
+      </node>
+      <node id="5" name="LEAF1" type="qemu" template="linux" image="cumulus-linux-5.4.0-vx-amd64-qemu" ethernet="24" console="telnet" delay="0" icon="Switch.png" left="100" top="380" uuid="91717aae-9636-48af-8191-928ba2418bc3" config="0">
+        <interface id="0" name="Ethernet1" type="ethernet" network_id="1"/>
+        <interface id="1" name="Ethernet2" type="ethernet" network_id="2"/>
+        <interface id="2" name="Ethernet10" type="ethernet" network_id="17"/>
+        <interface id="3" name="Ethernet11" type="ethernet" network_id="18"/>
+        <interface id="4" name="Ethernet20" type="ethernet" network_id="23"/>
+        <interface id="5" name="Ethernet21" type="ethernet" network_id="27"/>
+      </node>
+      <node id="6" name="LEAF2" type="qemu" template="linux" image="cumulus-linux-5.4.0-vx-amd64-qemu" ethernet="24" console="telnet" delay="0" icon="Switch.png" left="320" top="380" uuid="0e65a606-f31d-4d01-bd7c-374d722fe5e5" config="0">
+        <interface id="0" name="Ethernet1" type="ethernet" network_id="3"/>
+        <interface id="1" name="Ethernet2" type="ethernet" network_id="4"/>
+        <interface id="2" name="Ethernet10" type="ethernet" network_id="17"/>
+        <interface id="3" name="Ethernet11" type="ethernet" network_id="18"/>
+        <interface id="4" name="Ethernet20" type="ethernet" network_id="24"/>
+        <interface id="5" name="Ethernet21" type="ethernet" network_id="28"/>
+      </node>
+      <node id="7" name="LEAF3" type="qemu" template="linux" image="cumulus-linux-5.4.0-vx-amd64-qemu" ethernet="24" console="telnet" delay="0" icon="Switch.png" left="620" top="380" uuid="72c74c0b-7b30-4bf6-89c7-709e260e948c" config="0">
+        <interface id="0" name="Ethernet1" type="ethernet" network_id="5"/>
+        <interface id="1" name="Ethernet2" type="ethernet" network_id="6"/>
+        <interface id="2" name="Ethernet10" type="ethernet" network_id="19"/>
+        <interface id="3" name="Ethernet11" type="ethernet" network_id="20"/>
+        <interface id="4" name="Ethernet20" type="ethernet" network_id="25"/>
+        <interface id="5" name="Ethernet21" type="ethernet" network_id="29"/>
+      </node>
+      <node id="8" name="LEAF4" type="qemu" template="linux" image="cumulus-linux-5.4.0-vx-amd64-qemu" ethernet="24" console="telnet" delay="0" icon="Switch.png" left="840" top="380" uuid="0852c807-8653-4592-94b6-11ce5a46a5fd" config="0">
+        <interface id="0" name="Ethernet1" type="ethernet" network_id="7"/>
+        <interface id="1" name="Ethernet2" type="ethernet" network_id="8"/>
+        <interface id="2" name="Ethernet10" type="ethernet" network_id="19"/>
+        <interface id="3" name="Ethernet11" type="ethernet" network_id="20"/>
+        <interface id="4" name="Ethernet20" type="ethernet" network_id="26"/>
+        <interface id="5" name="Ethernet21" type="ethernet" network_id="30"/>
+      </node>
+      <node id="9" name="BL1" type="qemu" template="linux" image="cumulus-linux-5.4.0-vx-amd64-qemu" ethernet="24" console="telnet" delay="0" icon="Switch.png" left="1140" top="380" uuid="604166fa-33e4-4d2e-85b2-2521074e45f9" config="0">
+        <interface id="0" name="Ethernet1" type="ethernet" network_id="9"/>
+        <interface id="1" name="Ethernet2" type="ethernet" network_id="10"/>
+        <interface id="2" name="Ethernet10" type="ethernet" network_id="21"/>
+        <interface id="3" name="Ethernet11" type="ethernet" network_id="22"/>
+        <interface id="4" name="Ethernet20" type="ethernet" network_id="31"/>
+        <interface id="5" name="Ethernet30" type="ethernet" network_id="33"/>
+      </node>
+      <node id="10" name="BL2" type="qemu" template="linux" image="cumulus-linux-5.4.0-vx-amd64-qemu" ethernet="24" console="telnet" delay="0" icon="Switch.png" left="1360" top="380" uuid="c4c691bd-6275-4b10-a6ce-7de0fc41d02e" config="0">
+        <interface id="0" name="Ethernet1" type="ethernet" network_id="11"/>
+        <interface id="1" name="Ethernet2" type="ethernet" network_id="12"/>
+        <interface id="2" name="Ethernet10" type="ethernet" network_id="21"/>
+        <interface id="3" name="Ethernet11" type="ethernet" network_id="22"/>
+        <interface id="4" name="Ethernet20" type="ethernet" network_id="32"/>
+        <interface id="5" name="Ethernet30" type="ethernet" network_id="34"/>
+      </node>
+      <node id="11" name="GPU-A" type="qemu" template="linux" image="linux" ethernet="24" console="telnet" delay="0" icon="Desktop.png" left="120" top="620" uuid="67bb0910-a529-42fb-b418-069b6f81ddf3" config="0">
+        <interface id="0" name="eth0" type="ethernet" network_id="23"/>
+        <interface id="1" name="eth1" type="ethernet" network_id="24"/>
+      </node>
+      <node id="12" name="GPU-C" type="qemu" template="linux" image="linux" ethernet="24" console="telnet" delay="0" icon="Desktop.png" left="340" top="620" uuid="0f63118c-14b7-43f9-b80b-801dfa78a71c" config="0">
+        <interface id="0" name="eth0" type="ethernet" network_id="27"/>
+        <interface id="1" name="eth1" type="ethernet" network_id="28"/>
+      </node>
+      <node id="13" name="GPU-B" type="qemu" template="linux" image="linux" ethernet="24" console="telnet" delay="0" icon="Desktop.png" left="640" top="620" uuid="92240965-cbeb-4b0f-af6c-9799bcba16a2" config="0">
+        <interface id="0" name="eth0" type="ethernet" network_id="25"/>
+        <interface id="1" name="eth1" type="ethernet" network_id="26"/>
+      </node>
+      <node id="14" name="STORAGE" type="qemu" template="linux" image="linux" ethernet="24" console="telnet" delay="0" icon="Desktop.png" left="860" top="620" uuid="f2e20825-a37b-404b-9cc4-de85a0a53a6b" config="0">
+        <interface id="0" name="eth0" type="ethernet" network_id="29"/>
+        <interface id="1" name="eth1" type="ethernet" network_id="30"/>
+      </node>
+      <node id="15" name="COLLECTOR" type="qemu" template="linux" image="linux" ethernet="24" console="telnet" delay="0" icon="Desktop.png" left="1250" top="620" uuid="e25b4a54-4034-464f-83f9-f57a986d21ca" config="0">
+        <interface id="0" name="eth0" type="ethernet" network_id="31"/>
+        <interface id="1" name="eth1" type="ethernet" network_id="32"/>
+      </node>
+      <node id="16" name="PE1" type="qemu" template="veos" image="veos-lab" ethernet="24" console="telnet" delay="0" icon="Router.png" left="1160" top="820" uuid="9b208902-09e4-4112-9bba-2a1bd2ee96c6" config="0">
+        <interface id="0" name="Ethernet1" type="ethernet" network_id="33"/>
+        <interface id="1" name="Ethernet2" type="ethernet" network_id="35"/>
+      </node>
+      <node id="17" name="PE2" type="qemu" template="veos" image="veos-lab" ethernet="24" console="telnet" delay="0" icon="Router.png" left="1380" top="820" uuid="08fe6fba-6e26-4c22-9695-f7e59d94615d" config="0">
+        <interface id="0" name="Ethernet1" type="ethernet" network_id="34"/>
+        <interface id="1" name="Ethernet2" type="ethernet" network_id="35"/>
+        <interface id="2" name="Ethernet3" type="ethernet" network_id="36"/>
+      </node>
+      <node id="18" name="REMOTE-DC" type="qemu" template="veos" image="veos-lab" ethernet="24" console="telnet" delay="0" icon="Router.png" left="1600" top="820" uuid="8afdbf92-b48e-41b1-bb39-943c8736f8b4" config="0">
+        <interface id="0" name="Ethernet1" type="ethernet" network_id="36"/>
+      </node>
+    </nodes>
+    <networks>
+      <network id="1" type="bridge" name="L1_SP1" left="0" top="0" visibility="0"/>
+      <network id="2" type="bridge" name="L1_SP2" left="0" top="0" visibility="0"/>
+      <network id="3" type="bridge" name="L2_SP1" left="0" top="0" visibility="0"/>
+      <network id="4" type="bridge" name="L2_SP2" left="0" top="0" visibility="0"/>
+      <network id="5" type="bridge" name="L3_SP1" left="0" top="0" visibility="0"/>
+      <network id="6" type="bridge" name="L3_SP2" left="0" top="0" visibility="0"/>
+      <network id="7" type="bridge" name="L4_SP1" left="0" top="0" visibility="0"/>
+      <network id="8" type="bridge" name="L4_SP2" left="0" top="0" visibility="0"/>
+      <network id="9" type="bridge" name="BL1_SP1" left="0" top="0" visibility="0"/>
+      <network id="10" type="bridge" name="BL1_SP2" left="0" top="0" visibility="0"/>
+      <network id="11" type="bridge" name="BL2_SP1" left="0" top="0" visibility="0"/>
+      <network id="12" type="bridge" name="BL2_SP2" left="0" top="0" visibility="0"/>
+      <network id="13" type="bridge" name="RR1_SP1" left="0" top="0" visibility="0"/>
+      <network id="14" type="bridge" name="RR1_SP2" left="0" top="0" visibility="0"/>
+      <network id="15" type="bridge" name="RR2_SP1" left="0" top="0" visibility="0"/>
+      <network id="16" type="bridge" name="RR2_SP2" left="0" top="0" visibility="0"/>
+      <network id="17" type="bridge" name="POD1_MLAG_E10" left="0" top="0" visibility="0"/>
+      <network id="18" type="bridge" name="POD1_MLAG_E11" left="0" top="0" visibility="0"/>
+      <network id="19" type="bridge" name="POD2_MLAG_E10" left="0" top="0" visibility="0"/>
+      <network id="20" type="bridge" name="POD2_MLAG_E11" left="0" top="0" visibility="0"/>
+      <network id="21" type="bridge" name="BORDER_MLAG_E10" left="0" top="0" visibility="0"/>
+      <network id="22" type="bridge" name="BORDER_MLAG_E11" left="0" top="0" visibility="0"/>
+      <network id="23" type="bridge" name="GPUA_L1" left="0" top="0" visibility="0"/>
+      <network id="24" type="bridge" name="GPUA_L2" left="0" top="0" visibility="0"/>
+      <network id="25" type="bridge" name="GPUB_L3" left="0" top="0" visibility="0"/>
+      <network id="26" type="bridge" name="GPUB_L4" left="0" top="0" visibility="0"/>
+      <network id="27" type="bridge" name="GPUC_L1" left="0" top="0" visibility="0"/>
+      <network id="28" type="bridge" name="GPUC_L2" left="0" top="0" visibility="0"/>
+      <network id="29" type="bridge" name="STORAGE_L3" left="0" top="0" visibility="0"/>
+      <network id="30" type="bridge" name="STORAGE_L4" left="0" top="0" visibility="0"/>
+      <network id="31" type="bridge" name="COLLECTOR_BL1" left="0" top="0" visibility="0"/>
+      <network id="32" type="bridge" name="COLLECTOR_BL2" left="0" top="0" visibility="0"/>
+      <network id="33" type="bridge" name="BL1_PE1" left="0" top="0" visibility="0"/>
+      <network id="34" type="bridge" name="BL2_PE2" left="0" top="0" visibility="0"/>
+      <network id="35" type="bridge" name="PE1_PE2" left="0" top="0" visibility="0"/>
+      <network id="36" type="bridge" name="PE2_REMOTE" left="0" top="0" visibility="0"/>
+    </networks>
+  </topology>
+</lab>

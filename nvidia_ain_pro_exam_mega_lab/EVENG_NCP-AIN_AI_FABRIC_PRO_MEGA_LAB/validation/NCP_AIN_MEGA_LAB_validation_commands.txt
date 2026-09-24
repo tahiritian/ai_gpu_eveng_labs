@@ -1,0 +1,11 @@
+show ip ospf neighbor
+show ip route ospf
+show ipv6 interface brief
+show bgp evpn summary
+show bgp evpn route-type imet
+show bgp evpn route-type mac-ip
+show vxlan vni
+show mlag
+show port-channel summary
+show ip bgp summary
+show ip route 203.0.113.0

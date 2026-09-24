@@ -1,0 +1,5 @@
+This lab uses OSPF underlay for portability in EVE-NG.
+For an interview-focused eBGP underlay variant:
+- use unique ASNs per leaf and spine
+- keep the same /31 addressing model
+- preserve loopback reachability and MTU 9214

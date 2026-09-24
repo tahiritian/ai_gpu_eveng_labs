@@ -1,0 +1,77 @@
+LEAF1 - Cumulus / NVUE startup
+
+Port mapping:
+- swp1 = Ethernet1 -> SPINE1
+- swp2 = Ethernet2 -> SPINE2
+- swp3 = Ethernet10 -> LEAF2 peer-link member
+- swp4 = Ethernet11 -> LEAF2 peer-link member
+- swp5 = Ethernet20 -> GPU-A
+- swp6 = Ethernet21 -> GPU-C
+
+Node intent:
+- Lo0 10.255.0.1/32
+- Lo1 10.254.0.1/32
+- Lo2 10.254.12.12/32
+- peer SVI VLAN4094 = 10.255.12.1/30
+- swp1 10.0.0.0/31
+- swp2 10.0.0.12/31
+- Po10 access VLAN110
+- Po11 access VLAN210
+
+Apply NVUE intent:
+- system hostname LEAF1
+- enable IPv4 and IPv6 routing
+- set anycast gateway MAC to 00:1c:73:00:10:99
+- create VRFs AI_FABRIC, AI_SERVICES, TENANT_B
+- create VLANs 110,120,130,210,4094
+- make swp1 and swp2 routed, MTU 9214
+- create bond bond100 from swp3 and swp4 for MLAG peer-link
+- trunk bond100 with VLANs 110,120,130,210,4094
+- create bond bond10 from swp5 and set access VLAN110, MLAG id 10
+- create bond bond11 from swp6 and set access VLAN210, MLAG id 11
+- create vlan4094 interface with 10.255.12.1/30
+- create VLAN SVIs with anycast gateways:
+  - vlan110 172.16.110.1/24 and 2001:db8:110::1/64 in VRF AI_FABRIC
+  - vlan120 172.16.120.1/24 and 2001:db8:120::1/64 in VRF AI_FABRIC
+  - vlan130 172.16.130.1/24 and 2001:db8:130::1/64 in VRF AI_SERVICES
+  - vlan210 172.16.210.1/24 and 2001:db8:210::1/64 in VRF TENANT_B
+- create VTEP source from Lo1 and shared VTEP Lo2
+- map VNIs:
+  - VLAN110 -> 10110
+  - VLAN120 -> 10120
+  - VLAN130 -> 10130
+  - VLAN210 -> 10210
+  - AI_FABRIC -> 50110
+  - AI_SERVICES -> 50130
+  - TENANT_B -> 50210
+- create MLAG domain POD1 with peer 10.255.12.2
+
+FRR intent:
+router ospf
+  router-id 10.255.0.1
+  network 10.255.0.1/32 area 0.0.0.0
+  network 10.254.0.1/32 area 0.0.0.0
+  network 10.254.12.12/32 area 0.0.0.0
+  interface swp1 area 0.0.0.0
+  interface swp2 area 0.0.0.0
+
+router bgp 65000
+  router-id 10.255.0.1
+  neighbor 10.255.255.11 remote-as 65000
+  neighbor 10.255.255.12 remote-as 65000
+  neighbor RR peer-group
+  neighbor RR update-source lo
+  address-family l2vpn evpn
+    neighbor 10.255.255.11 activate
+    neighbor 10.255.255.12 activate
+  EVPN L2VNI:
+    10110,10120,10130,10210
+  EVPN L3VNI:
+    50110,50130,50210
+
+Validation:
+- nv show interface
+- nv show bridge domain
+- nv show vrf
+- vtysh -c "show ip ospf neighbor"
+- vtysh -c "show bgp l2vpn evpn summary"

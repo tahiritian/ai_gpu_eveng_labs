@@ -1,0 +1,41 @@
+BL1 - Cumulus / NVUE startup
+
+Port mapping:
+- swp1 = Ethernet1 -> SPINE1
+- swp2 = Ethernet2 -> SPINE2
+- swp3 = Ethernet10 -> BL2 peer-link member
+- swp4 = Ethernet11 -> BL2 peer-link member
+- swp5 = Ethernet20 -> COLLECTOR
+- swp6 = Ethernet30 -> PE1
+
+Node intent:
+- Lo0 10.255.0.11/32
+- Lo1 10.254.0.11/32
+- Lo2 10.254.78.78/32
+- Lo100 100.64.10.11/32
+- peer SVI VLAN4094 = 10.255.78.1/30
+- swp1 10.0.0.8/31
+- swp2 10.0.0.20/31
+- swp6 198.51.100.0/31 routed to PE1
+- bond30 access VLAN130 for COLLECTOR
+- MLAG domain BORDER with peer 10.255.78.2
+
+Keep these common sections:
+- VRFs AI_FABRIC, AI_SERVICES, TENANT_B
+- VLANs 110,120,130,210,4094
+- anycast gateway addresses
+- VNI mappings 10110,10120,10130,10210 and 50110,50130,50210
+- OSPF on swp1 and swp2
+- EVPN to route reflectors 10.255.255.11 and 10.255.255.12
+
+Border-specific BGP intent:
+- local AS 65000
+- external neighbor 198.51.100.1 remote-as 65301
+- advertise 100.64.10.11/32
+- keep EVPN and IPv4 unicast active
+
+Validation:
+- nv show interface
+- vtysh -c "show bgp summary"
+- vtysh -c "show bgp l2vpn evpn summary"
+- vtysh -c "show ip route 203.0.113.0/24"

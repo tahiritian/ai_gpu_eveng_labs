@@ -1,0 +1,35 @@
+LEAF3 - Cumulus / NVUE startup
+
+Port mapping:
+- swp1 = Ethernet1 -> SPINE1
+- swp2 = Ethernet2 -> SPINE2
+- swp3 = Ethernet10 -> LEAF4 peer-link member
+- swp4 = Ethernet11 -> LEAF4 peer-link member
+- swp5 = Ethernet20 -> GPU-B
+- swp6 = Ethernet21 -> STORAGE
+
+Node intent:
+- Lo0 10.255.0.3/32
+- Lo1 10.254.0.3/32
+- Lo2 10.254.34.34/32
+- peer SVI VLAN4094 = 10.255.34.1/30
+- swp1 10.0.0.4/31
+- swp2 10.0.0.16/31
+- bond20 access VLAN110 for GPU-B
+- bond21 access VLAN120 for STORAGE
+- MLAG domain POD2 with peer 10.255.34.2
+
+Keep the same common fabric sections as LEAF1 for:
+- VRFs
+- VLANs
+- VNI mappings
+- anycast gateway addresses
+- OSPF
+- BGP EVPN
+- MTU 9214
+
+Validation:
+- nv show interface
+- nv show bridge domain
+- vtysh -c "show ip ospf neighbor"
+- vtysh -c "show bgp l2vpn evpn summary"

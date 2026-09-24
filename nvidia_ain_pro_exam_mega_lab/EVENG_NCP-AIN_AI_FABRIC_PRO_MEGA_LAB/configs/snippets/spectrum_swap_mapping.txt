@@ -1,0 +1,6 @@
+Replace LEAF1-4 and BL1-2 with Spectrum images if available.
+Keep the same topology, addressing, VNI, and VRF intent.
+Port EVPN, VXLAN, MLAG, MTU, and QoS policy to Spectrum CLI.
+This package now includes Cumulus/NVUE references under configs/cumulus_nvue/.
+Use topology/NCP-AIN_AI_FABRIC_PRO_MEGA_LAB_mixed_eos_cumulus.unl for the mixed EOS + Cumulus variant.
+For Cumulus Linux 5.4 specifically, use configs/cumulus_5_4_paste_ready/.
