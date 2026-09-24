@@ -4,11 +4,11 @@
 ## Start Here
 
 Read these in order:
-`
+```
 1. [Topology Poster] => (docs/NCP-AIN_AI_FABRIC_PRO_MEGA_LAB_topology_2_poster.pdf)
 2. [Quick Start Guide] => (docs/NCP-AIN_AI_FABRIC_PRO_MEGA_LAB_quick_start.pdf)
 3. [Lab Workbook] => (docs/NCP-AIN_AI_FABRIC_PRO_MEGA_LAB_workbook.pdf)
-`
+```
 ## Import into EVE-NG
 
 Pick one topology:
