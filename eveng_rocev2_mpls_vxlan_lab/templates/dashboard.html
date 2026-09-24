@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ dashboard_title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+  </head>
+  <body>
+    <header class="hero-shell">
+      <div class="hero">
+        <div class="hero-copy">
+          <div class="eyebrow">Lab Dashboard</div>
+          <h1>{{ dashboard_title }}</h1>
+          <p>Single-browser workspace for workbooks, topology views, configs, and validation references. The lab content stays unchanged; this is only a front-view dashboard.</p>
+        </div>
+        <div class="hero-actions">
+          <a class="button secondary" href="{{ url_for('content', rel_path='README.md') }}" target="_blank" rel="noopener noreferrer">Open README</a>
+        </div>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      {% for category in categories %}
+      <a
+        class="tab {% if category == active_category %}active{% endif %}"
+        href="{{ url_for('dashboard', tab=category) }}"
+      >{{ category }}</a>
+      {% endfor %}
+    </nav>
+
+    {% if active_category == "Home" %}
+    <main class="home-layout">
+      <section class="home-hero-card">
+        <img class="home-topology" src="{{ url_for('content', rel_path=home_image) }}" alt="Validated lab topology">
+      </section>
+      <section class="home-readme-card">
+        {% if rendered_html %}
+        <article class="markdown-body">{{ rendered_html|safe }}</article>
+        {% else %}
+        <pre class="code-view">{{ raw_text }}</pre>
+        {% endif %}
+      </section>
+    </main>
+    {% else %}
+    <main class="layout">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <h2>{{ active_category }}</h2>
+          <span>{{ files|length }} files</span>
+        </div>
+
+        <div class="file-list">
+          {% for entry in files %}
+          <a
+            class="file-item {% if entry.rel_path == selected_rel %}selected{% endif %}"
+            href="{{ url_for('dashboard', tab=active_category, file=entry.rel_path) }}"
+          >
+            <div class="file-name">{{ entry.name }}</div>
+            <div class="file-meta">{{ entry.size_kb }} KB</div>
+          </a>
+          {% else %}
+          <div class="empty-state">No files in this tab.</div>
+          {% endfor %}
+        </div>
+      </aside>
+
+      <section class="viewer">
+        <div class="viewer-header">
+          <div>
+            <h2>{{ selected_name }}</h2>
+            <p>{{ active_category }}</p>
+          </div>
+          <div class="viewer-tools">
+            <span class="badge">{{ selected_kind|upper }}</span>
+            <a class="button secondary small" href="{{ url_for('content', rel_path=selected_rel) }}" target="_blank" rel="noopener noreferrer">Open Raw</a>
+          </div>
+        </div>
+
+        {% if selected_kind == "pdf" %}
+        <iframe class="pdf-frame" src="{{ url_for('content', rel_path=selected_rel) }}"></iframe>
+        {% elif selected_kind == "image" %}
+        <div class="image-wrap">
+          <img src="{{ url_for('content', rel_path=selected_rel) }}" alt="{{ selected_name }}">
+        </div>
+        {% elif selected_kind == "text" and rendered_html %}
+        <article class="markdown-body">{{ rendered_html|safe }}</article>
+        {% elif selected_kind == "text" %}
+        <pre class="code-view">{{ raw_text }}</pre>
+        {% else %}
+        <div class="empty-state">
+          This file type is not rendered inline. Use <strong>Open Raw</strong>.
+        </div>
+        {% endif %}
+      </section>
+    </main>
+    {% endif %}
+  </body>
+</html>

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<lab name="RoCEv2 MPLS EVPN VXLAN Current Salvaged Lab" id="0" version="1" scripttimeout="300" lock="0">
+  <topology>
+    <nodes>
+      <node id="1" name="SPINE1" type="qemu" template="veos" image="veos-lab" ethernet="8" console="telnet" delay="0" icon="Router.png" left="180" top="60" uuid="8b56bdf4-a4da-4fc6-8b32-2fc08d230001" config="0">
+        <interface id="0" name="Ethernet1" type="ethernet" network_id="1"/>
+        <interface id="1" name="Ethernet2" type="ethernet" network_id="3"/>
+      </node>
+      <node id="2" name="SPINE2" type="qemu" template="veos" image="veos-lab" ethernet="8" console="telnet" delay="0" icon="Router.png" left="620" top="60" uuid="8b56bdf4-a4da-4fc6-8b32-2fc08d230002" config="0">
+        <interface id="0" name="Ethernet1" type="ethernet" network_id="2"/>
+        <interface id="1" name="Ethernet2" type="ethernet" network_id="4"/>
+      </node>
+      <node id="3" name="LEAF-1" type="qemu" template="linux" image="linux-cumulus-vx-5.4" ethernet="24" console="telnet" delay="0" icon="Switch.png" left="180" top="300" uuid="8b56bdf4-a4da-4fc6-8b32-2fc08d230003" config="0">
+        <interface id="0" name="eth0" type="ethernet" network_id="1"/>
+        <interface id="1" name="swp1" type="ethernet" network_id="2"/>
+        <interface id="2" name="swp2" type="ethernet" network_id="5"/>
+      </node>
+      <node id="4" name="LEAF-2" type="qemu" template="linux" image="linux-cumulus-vx-5.4" ethernet="24" console="telnet" delay="0" icon="Switch.png" left="620" top="300" uuid="8b56bdf4-a4da-4fc6-8b32-2fc08d230004" config="0">
+        <interface id="0" name="eth0" type="ethernet" network_id="3"/>
+        <interface id="1" name="swp1" type="ethernet" network_id="4"/>
+        <interface id="2" name="swp2" type="ethernet" network_id="6"/>
+      </node>
+      <node id="5" name="GPU-A" type="qemu" template="linux" image="linux-centos-8" ethernet="8" console="telnet" delay="0" icon="Desktop.png" left="180" top="520" uuid="8b56bdf4-a4da-4fc6-8b32-2fc08d230005" config="0">
+        <interface id="0" name="eth0" type="ethernet" network_id="5"/>
+      </node>
+      <node id="6" name="GPU-B" type="qemu" template="linux" image="linux-centos-8" ethernet="8" console="telnet" delay="0" icon="Desktop.png" left="620" top="520" uuid="8b56bdf4-a4da-4fc6-8b32-2fc08d230006" config="0">
+        <interface id="0" name="eth0" type="ethernet" network_id="6"/>
+      </node>
+    </nodes>
+    <networks>
+      <network id="1" type="bridge" name="SP1_LEAF1" left="0" top="0" visibility="0"/>
+      <network id="2" type="bridge" name="SP2_LEAF1" left="0" top="0" visibility="0"/>
+      <network id="3" type="bridge" name="SP1_LEAF2" left="0" top="0" visibility="0"/>
+      <network id="4" type="bridge" name="SP2_LEAF2" left="0" top="0" visibility="0"/>
+      <network id="5" type="bridge" name="LEAF1_GPUA" left="0" top="0" visibility="0"/>
+      <network id="6" type="bridge" name="LEAF2_GPUB" left="0" top="0" visibility="0"/>
+    </networks>
+  </topology>
+</lab>

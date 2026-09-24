@@ -1,0 +1,46 @@
+source /etc/network/interfaces.d/*.intf
+
+auto lo
+iface lo inet loopback
+    address 10.255.255.22/32
+    address 10.255.1.22/32
+
+auto swp23
+iface swp23 inet dhcp
+    vrf mgmt
+
+auto mgmt
+iface mgmt
+    address 127.0.0.1/8
+    address ::1/128
+    vrf-table auto
+
+auto eth0
+iface eth0
+    address 10.0.0.5/31
+    mtu 1500
+
+auto swp1
+iface swp1
+    address 10.0.0.7/31
+    mtu 1500
+
+auto swp2
+iface swp2
+    bridge-access 10
+    mtu 1500
+
+auto vni10
+iface vni10
+    vxlan-id 10010
+    vxlan-local-tunnelip 10.255.1.22
+    bridge-access 10
+    mtu 1500
+
+auto br0
+iface br0
+    bridge-ports swp2 vni10
+    bridge-vlan-aware yes
+    bridge-vids 10
+    mtu 1500
+
