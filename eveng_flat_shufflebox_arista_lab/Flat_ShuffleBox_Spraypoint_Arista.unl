@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<lab name="Flat_ShuffleBox_Spraypoint_Arista" id="0" version="1" scripttimeout="300" lock="0" description="Arista EVE-NG lab simulating flat ShuffleBox cabling and Spraypoint-style multipath routing">
+  <topology>
+    <nodes>
+      <node id="1" name="R1" type="qemu" template="veos" image="" console="telnet" delay="0" icon="Router.png" left="160" top="120" ethernet="6" ram="2048" cpu="1">
+        <interface id="1" name="Ethernet1" type="ethernet" network_id="1"/>
+        <interface id="2" name="Ethernet2" type="ethernet" network_id="2"/>
+        <interface id="3" name="Ethernet3" type="ethernet" network_id="3"/>
+        <interface id="4" name="Ethernet4" type="ethernet" network_id="4"/>
+        <interface id="5" name="Ethernet5" type="ethernet" network_id="101"/>
+      </node>
+      <node id="2" name="R2" type="qemu" template="veos" image="" console="telnet" delay="0" icon="Router.png" left="420" top="120" ethernet="6" ram="2048" cpu="1">
+        <interface id="1" name="Ethernet1" type="ethernet" network_id="1"/>
+        <interface id="2" name="Ethernet2" type="ethernet" network_id="5"/>
+        <interface id="3" name="Ethernet3" type="ethernet" network_id="6"/>
+        <interface id="4" name="Ethernet4" type="ethernet" network_id="7"/>
+      </node>
+      <node id="3" name="R3" type="qemu" template="veos" image="" console="telnet" delay="0" icon="Router.png" left="420" top="300" ethernet="6" ram="2048" cpu="1">
+        <interface id="1" name="Ethernet1" type="ethernet" network_id="5"/>
+        <interface id="2" name="Ethernet2" type="ethernet" network_id="8"/>
+        <interface id="3" name="Ethernet3" type="ethernet" network_id="9"/>
+        <interface id="4" name="Ethernet4" type="ethernet" network_id="10"/>
+        <interface id="5" name="Ethernet5" type="ethernet" network_id="103"/>
+      </node>
+      <node id="4" name="R4" type="qemu" template="veos" image="" console="telnet" delay="0" icon="Router.png" left="160" top="300" ethernet="6" ram="2048" cpu="1">
+        <interface id="1" name="Ethernet1" type="ethernet" network_id="8"/>
+        <interface id="2" name="Ethernet2" type="ethernet" network_id="11"/>
+        <interface id="3" name="Ethernet3" type="ethernet" network_id="3"/>
+        <interface id="4" name="Ethernet4" type="ethernet" network_id="12"/>
+      </node>
+      <node id="5" name="R5" type="qemu" template="veos" image="" console="telnet" delay="0" icon="Router.png" left="680" top="300" ethernet="6" ram="2048" cpu="1">
+        <interface id="1" name="Ethernet1" type="ethernet" network_id="11"/>
+        <interface id="2" name="Ethernet2" type="ethernet" network_id="13"/>
+        <interface id="3" name="Ethernet3" type="ethernet" network_id="6"/>
+        <interface id="4" name="Ethernet4" type="ethernet" network_id="14"/>
+      </node>
+      <node id="6" name="R6" type="qemu" template="veos" image="" console="telnet" delay="0" icon="Router.png" left="680" top="480" ethernet="6" ram="2048" cpu="1">
+        <interface id="1" name="Ethernet1" type="ethernet" network_id="13"/>
+        <interface id="2" name="Ethernet2" type="ethernet" network_id="15"/>
+        <interface id="3" name="Ethernet3" type="ethernet" network_id="9"/>
+        <interface id="4" name="Ethernet4" type="ethernet" network_id="4"/>
+        <interface id="5" name="Ethernet5" type="ethernet" network_id="106"/>
+      </node>
+      <node id="7" name="R7" type="qemu" template="veos" image="" console="telnet" delay="0" icon="Router.png" left="420" top="480" ethernet="6" ram="2048" cpu="1">
+        <interface id="1" name="Ethernet1" type="ethernet" network_id="15"/>
+        <interface id="2" name="Ethernet2" type="ethernet" network_id="16"/>
+        <interface id="3" name="Ethernet3" type="ethernet" network_id="12"/>
+        <interface id="4" name="Ethernet4" type="ethernet" network_id="7"/>
+      </node>
+      <node id="8" name="R8" type="qemu" template="veos" image="" console="telnet" delay="0" icon="Router.png" left="160" top="480" ethernet="6" ram="2048" cpu="1">
+        <interface id="1" name="Ethernet1" type="ethernet" network_id="16"/>
+        <interface id="2" name="Ethernet2" type="ethernet" network_id="2"/>
+        <interface id="3" name="Ethernet3" type="ethernet" network_id="14"/>
+        <interface id="4" name="Ethernet4" type="ethernet" network_id="10"/>
+        <interface id="5" name="Ethernet5" type="ethernet" network_id="108"/>
+      </node>
+      <node id="101" name="H1" type="qemu" template="linux" image="" console="telnet" delay="0" icon="Server.png" left="20" top="120" ethernet="1" ram="512" cpu="1">
+        <interface id="0" name="eth0" type="ethernet" network_id="101"/>
+      </node>
+      <node id="103" name="H3" type="qemu" template="linux" image="" console="telnet" delay="0" icon="Server.png" left="560" top="300" ethernet="1" ram="512" cpu="1">
+        <interface id="0" name="eth0" type="ethernet" network_id="103"/>
+      </node>
+      <node id="106" name="H6" type="qemu" template="linux" image="" console="telnet" delay="0" icon="Server.png" left="820" top="480" ethernet="1" ram="512" cpu="1">
+        <interface id="0" name="eth0" type="ethernet" network_id="106"/>
+      </node>
+      <node id="108" name="H8" type="qemu" template="linux" image="" console="telnet" delay="0" icon="Server.png" left="20" top="480" ethernet="1" ram="512" cpu="1">
+        <interface id="0" name="eth0" type="ethernet" network_id="108"/>
+      </node>
+    </nodes>
+    <networks>
+      <network id="1" type="bridge" name="SB-01_R1_E1_R2_E1"/>
+      <network id="2" type="bridge" name="SB-02_R1_E2_R8_E2"/>
+      <network id="3" type="bridge" name="SB-03_R1_E3_R4_E3"/>
+      <network id="4" type="bridge" name="SB-04_R1_E4_R6_E4"/>
+      <network id="5" type="bridge" name="SB-05_R2_E2_R3_E1"/>
+      <network id="6" type="bridge" name="SB-06_R2_E3_R5_E3"/>
+      <network id="7" type="bridge" name="SB-07_R2_E4_R7_E4"/>
+      <network id="8" type="bridge" name="SB-08_R3_E2_R4_E1"/>
+      <network id="9" type="bridge" name="SB-09_R3_E3_R6_E3"/>
+      <network id="10" type="bridge" name="SB-10_R3_E4_R8_E4"/>
+      <network id="11" type="bridge" name="SB-11_R4_E2_R5_E1"/>
+      <network id="12" type="bridge" name="SB-12_R4_E4_R7_E3"/>
+      <network id="13" type="bridge" name="SB-13_R5_E2_R6_E1"/>
+      <network id="14" type="bridge" name="SB-14_R5_E4_R8_E3"/>
+      <network id="15" type="bridge" name="SB-15_R6_E2_R7_E1"/>
+      <network id="16" type="bridge" name="SB-16_R7_E2_R8_E1"/>
+      <network id="101" type="bridge" name="HOST-01_R1_H1"/>
+      <network id="103" type="bridge" name="HOST-03_R3_H3"/>
+      <network id="106" type="bridge" name="HOST-06_R6_H6"/>
+      <network id="108" type="bridge" name="HOST-08_R8_H8"/>
+    </networks>
+  </topology>
+</lab>
