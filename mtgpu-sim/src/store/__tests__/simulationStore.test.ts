@@ -1,0 +1,529 @@
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { useSimulationStore } from "../simulationStore";
+import { useLearningProgressStore } from "../learningProgressStore";
+import { createCustomCluster } from "../../utils/clusterFactory";
+import type { Scenario } from "../../types/scenarios";
+
+// Mock localStorage
+const localStorageMock = (() => {
+  let store: Record<string, string> = {};
+  return {
+    getItem: vi.fn((key: string) => store[key] || null),
+    setItem: vi.fn((key: string, value: string) => {
+      store[key] = value;
+    }),
+    removeItem: vi.fn((key: string) => {
+      delete store[key];
+    }),
+    clear: vi.fn(() => {
+      store = {};
+    }),
+  };
+})();
+
+Object.defineProperty(window, "localStorage", { value: localStorageMock });
+
+describe("simulationStore.trackToolUsage - Multi-family mapping", () => {
+  let markToolUsedSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    useSimulationStore.getState().resetSimulation();
+    localStorageMock.clear();
+    markToolUsedSpy = vi.spyOn(
+      useLearningProgressStore.getState(),
+      "markToolUsed",
+    );
+  });
+
+  it("should credit both gpu-monitoring and xid-diagnostics for nvidia-smi", () => {
+    useSimulationStore.getState().trackToolUsage("nvidia-smi");
+
+    expect(markToolUsedSpy).toHaveBeenCalledTimes(2);
+    expect(markToolUsedSpy).toHaveBeenCalledWith(
+      "gpu-monitoring",
+      "nvidia-smi",
+    );
+    expect(markToolUsedSpy).toHaveBeenCalledWith(
+      "xid-diagnostics",
+      "nvidia-smi",
+    );
+  });
+
+  it("should credit xid-diagnostics for dmesg", () => {
+    useSimulationStore.getState().trackToolUsage("dmesg");
+
+    expect(markToolUsedSpy).toHaveBeenCalledTimes(1);
+    expect(markToolUsedSpy).toHaveBeenCalledWith("xid-diagnostics", "dmesg");
+  });
+
+  it("should credit only infiniband-tools for ibstat (single-family)", () => {
+    useSimulationStore.getState().trackToolUsage("ibstat");
+
+    expect(markToolUsedSpy).toHaveBeenCalledTimes(1);
+    expect(markToolUsedSpy).toHaveBeenCalledWith("infiniband-tools", "ibstat");
+  });
+
+  it("should credit both diagnostics and xid-diagnostics for dcgmi diag (compound key)", () => {
+    useSimulationStore.getState().trackToolUsage("dcgmi diag -r 1");
+
+    expect(markToolUsedSpy).toHaveBeenCalledTimes(2);
+    expect(markToolUsedSpy).toHaveBeenCalledWith("diagnostics", "dcgmi");
+    expect(markToolUsedSpy).toHaveBeenCalledWith("xid-diagnostics", "dcgmi");
+  });
+
+  it("should credit both diagnostics and xid-diagnostics for nvidia-bug-report.sh", () => {
+    useSimulationStore
+      .getState()
+      .trackToolUsage("nvidia-bug-report.sh --safe-mode");
+
+    expect(markToolUsedSpy).toHaveBeenCalledTimes(2);
+    expect(markToolUsedSpy).toHaveBeenCalledWith(
+      "diagnostics",
+      "nvidia-bug-report.sh",
+    );
+    expect(markToolUsedSpy).toHaveBeenCalledWith(
+      "xid-diagnostics",
+      "nvidia-bug-report.sh",
+    );
+  });
+
+  it("should not call markToolUsed for unknown commands", () => {
+    useSimulationStore.getState().trackToolUsage("unknowncmd --flag");
+
+    expect(markToolUsedSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe("setBugReportCollected", () => {
+  it("sets the bugReportCollected flag on the named node", () => {
+    const store = useSimulationStore.getState();
+    const nodeId = store.cluster.nodes[0].id;
+
+    store.setBugReportCollected(nodeId, true);
+    expect(
+      useSimulationStore.getState().cluster.nodes.find((n) => n.id === nodeId)
+        ?.bugReportCollected,
+    ).toBe(true);
+
+    store.setBugReportCollected(nodeId, false);
+    expect(
+      useSimulationStore.getState().cluster.nodes.find((n) => n.id === nodeId)
+        ?.bugReportCollected,
+    ).toBe(false);
+  });
+
+  it("ignores an unknown node id", () => {
+    expect(() =>
+      useSimulationStore.getState().setBugReportCollected("nope", true),
+    ).not.toThrow();
+  });
+});
+
+describe("persistence sanitization (partialize)", () => {
+  it("strips session-scoped remediation flags from the persisted cluster", () => {
+    const store = useSimulationStore.getState();
+    const nodeId = store.cluster.nodes[0].id;
+    store.setBugReportCollected(nodeId, true);
+    store.updateGPU(nodeId, 0, { rmaStatus: "pending" });
+
+    const partialize = useSimulationStore.persist.getOptions().partialize;
+    expect(partialize).toBeDefined();
+
+    const persisted = partialize!(useSimulationStore.getState()) as {
+      cluster: {
+        nodes: {
+          bugReportCollected?: boolean;
+          gpus: { rmaStatus?: string }[];
+        }[];
+      };
+    };
+
+    // Persisted blob must NOT carry in-session remediation progress.
+    expect(persisted.cluster.nodes[0].bugReportCollected).toBeUndefined();
+    expect(persisted.cluster.nodes[0].gpus[0].rmaStatus).toBeUndefined();
+
+    // ...but the live in-memory state is untouched (only persistence is sanitized).
+    const live = useSimulationStore.getState();
+    expect(live.cluster.nodes[0].bugReportCollected).toBe(true);
+    expect(live.cluster.nodes[0].gpus[0].rmaStatus).toBe("pending");
+  });
+});
+
+describe("persistence migration (migrate)", () => {
+  it("drops only the stale cluster on v0→v1, preserving user progress", () => {
+    const migrate = useSimulationStore.persist.getOptions().migrate;
+    expect(migrate).toBeDefined();
+
+    const v0State = {
+      cluster: { nodes: [{ id: "node-1", cpuCount: 2 }] },
+      systemType: "DGX-H100",
+      simulationSpeed: 2,
+      scenarioProgress: { "domain1-x": { steps: [] } },
+      completedScenarios: ["domain1-x"],
+    };
+
+    const migrated = migrate!(v0State, 0) as Record<string, unknown>;
+
+    // Stale cluster is dropped so createDefaultCluster() rebuilds it correctly.
+    expect(migrated.cluster).toBeUndefined();
+
+    // Everything else the user earned/chose survives the version bump.
+    expect(migrated.systemType).toBe("DGX-H100");
+    expect(migrated.simulationSpeed).toBe(2);
+    expect(migrated.scenarioProgress).toEqual({ "domain1-x": { steps: [] } });
+    expect(migrated.completedScenarios).toEqual(["domain1-x"]);
+  });
+
+  it("drops the cluster on v1→v2 (Phase 6 InfiniBandHCA/Port schema change), preserving progress", () => {
+    // v1 predates InfiniBandHCA.model and InfiniBandPort's traffic-counter
+    // fields (xmitDataBytes/rcvDataBytes/xmitPkts/rcvPkts) -- isValidCluster
+    // never inspects `hcas` at all, so without this migration a v1 blob's
+    // stale HCAs would survive merge() verbatim and NaN-poison perfquery's
+    // counters on the first tick under load.
+    const migrate = useSimulationStore.persist.getOptions().migrate;
+    const v1State = {
+      cluster: { nodes: [{ id: "node-1", gpus: [] }] },
+      completedScenarios: ["a"],
+    };
+
+    const migrated = migrate!(v1State, 1) as Record<string, unknown>;
+
+    expect(migrated.cluster).toBeUndefined();
+    expect(migrated.completedScenarios).toEqual(["a"]);
+  });
+
+  it("preserves the cluster for the current version (v3)", () => {
+    const migrate = useSimulationStore.persist.getOptions().migrate;
+    const v3State = {
+      cluster: { nodes: [{ id: "node-1", gpus: [] }] },
+      completedScenarios: ["a"],
+    };
+
+    const migrated = migrate!(v3State, 3) as Record<string, unknown>;
+
+    // v3 is current: the cluster is kept (merge re-validates afterward).
+    expect(migrated.cluster).toEqual({ nodes: [{ id: "node-1", gpus: [] }] });
+    expect(migrated.completedScenarios).toEqual(["a"]);
+  });
+
+  it("drops a v2 cluster so its node-local-only LIDs are rebuilt as fabric-unique", () => {
+    const migrate = useSimulationStore.persist.getOptions().migrate;
+    const v2State = {
+      cluster: { nodes: [{ id: "node-1", gpus: [] }] },
+      completedScenarios: ["a"],
+    };
+
+    const migrated = migrate!(v2State, 2) as Record<string, unknown>;
+
+    expect(migrated.cluster).toBeUndefined();
+    // Progress the user earned still survives the rebuild.
+    expect(migrated.completedScenarios).toEqual(["a"]);
+  });
+
+  it("drops the cluster for unknown/future versions, preserving progress (F6)", () => {
+    const migrate = useSimulationStore.persist.getOptions().migrate;
+    const futureState = {
+      cluster: { nodes: [{ id: "x", gpus: [] }] },
+      systemType: "DGX-VR200",
+      completedScenarios: ["a"],
+    };
+
+    const migrated = migrate!(futureState, 99) as Record<string, unknown>;
+
+    // A blob written by a newer build: do not trust its cluster shape.
+    expect(migrated.cluster).toBeUndefined();
+    expect(migrated.systemType).toBe("DGX-VR200");
+    expect(migrated.completedScenarios).toEqual(["a"]);
+  });
+});
+
+describe("persistence merge (rehydrate sanitizes corrupted cluster, F5)", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  // Defaults to the CURRENT persist version so these tests exercise merge()'s
+  // sanitizing, not the migration's cluster drop.
+  function seed(stateOverrides: Record<string, unknown>, version = 3) {
+    window.localStorage.setItem(
+      "nvidia-simulator-storage",
+      JSON.stringify({
+        state: {
+          systemType: "DGX-A100",
+          completedScenarios: ["kept-scenario"],
+          ...stateOverrides,
+        },
+        version,
+      }),
+    );
+  }
+
+  function corruptCluster(
+    mutate: (c: { nodes: unknown[]; name: string }) => void,
+  ): unknown {
+    const cluster = JSON.parse(
+      JSON.stringify(createCustomCluster(8, "DGX-A100")),
+    ) as { nodes: unknown[]; name: string };
+    mutate(cluster);
+    return cluster;
+  }
+
+  it("rebuilds a fresh 8-node cluster when a node is null", async () => {
+    seed({
+      cluster: corruptCluster((c) => {
+        c.nodes[3] = null;
+      }),
+    });
+
+    await useSimulationStore.persist.rehydrate();
+
+    const state = useSimulationStore.getState();
+    expect(state.cluster.nodes).toHaveLength(8);
+    expect(state.cluster.nodes.every((n) => n && Array.isArray(n.gpus))).toBe(
+      true,
+    );
+    expect(state.completedScenarios).toEqual(["kept-scenario"]);
+  });
+
+  it("rebuilds when a node is missing its gpus array", async () => {
+    seed({
+      cluster: corruptCluster((c) => {
+        delete (c.nodes[2] as Record<string, unknown>).gpus;
+      }),
+    });
+
+    await useSimulationStore.persist.rehydrate();
+
+    expect(useSimulationStore.getState().cluster.nodes).toHaveLength(8);
+  });
+
+  it("rebuilds when nodes is not an array", async () => {
+    seed({ cluster: { nodes: "banana" } });
+
+    await useSimulationStore.persist.rehydrate();
+
+    const state = useSimulationStore.getState();
+    expect(state.cluster.nodes).toHaveLength(8);
+    expect(state.completedScenarios).toEqual(["kept-scenario"]);
+  });
+
+  it("keeps a valid persisted cluster (does not rebuild)", async () => {
+    const cluster = createCustomCluster(8, "DGX-H100");
+    cluster.name = "KEPT-CLUSTER"; // sentinel: survives only if not rebuilt
+    seed({ cluster, systemType: "DGX-H100" });
+
+    await useSimulationStore.persist.rehydrate();
+
+    const state = useSimulationStore.getState();
+    expect(state.cluster.name).toBe("KEPT-CLUSTER");
+    expect(state.systemType).toBe("DGX-H100");
+  });
+
+  it("backfills computeMode on GPUs persisted before that field existed", async () => {
+    // A pre-computeMode localStorage blob is still shape-valid (isValidCluster
+    // only checks id/gpus array presence), so it survives merge() verbatim
+    // unless individually backfilled. Without the backfill, gpu.computeMode
+    // is undefined and the compute_mode query / -c verification path breaks
+    // for any returning user with a v1 blob predating that field.
+    const cluster = corruptCluster((c) => {
+      for (const node of c.nodes as { gpus: Record<string, unknown>[] }[]) {
+        for (const gpu of node.gpus) {
+          delete gpu.computeMode;
+        }
+      }
+    });
+    seed({ cluster, systemType: "DGX-A100" });
+
+    await useSimulationStore.persist.rehydrate();
+
+    const state = useSimulationStore.getState();
+    expect(
+      state.cluster.nodes.every((n) =>
+        n.gpus.every((g) => g.computeMode === "Default"),
+      ),
+    ).toBe(true);
+  });
+
+  it("rebuilds the cluster (via the v1->v2 migration), not passing through stale pre-Phase-6 HCAs, when rehydrating a v1 blob", async () => {
+    // A v1 blob's InfiniBandHCA/Port predate caType's redefinition (was a
+    // display string, e.g. "ConnectX-7 HCA"), the new required `model`
+    // field, and the 4 new required traffic-counter fields. isValidCluster
+    // never inspects `hcas` at all, so without the v1->v2 migration this
+    // stale shape would survive merge() verbatim -- and the tick loop's
+    // `port.xmitDataBytes + 12500000` would compute NaN on the very first
+    // tick under load and never recover.
+    const staleCluster = corruptCluster((c) => {
+      for (const node of c.nodes as {
+        hcas: Record<string, unknown>[];
+      }[]) {
+        for (const hca of node.hcas) {
+          hca.caType = "ConnectX-7 HCA";
+          delete hca.model;
+          for (const port of hca.ports as Record<string, unknown>[]) {
+            port.lid = 101;
+            delete port.xmitDataBytes;
+            delete port.rcvDataBytes;
+            delete port.xmitPkts;
+            delete port.rcvPkts;
+          }
+        }
+      }
+    });
+    // Seeded at version 1 (the pre-Phase-6 schema) -- the actual scenario a
+    // returning user's browser would have in localStorage.
+    seed({ cluster: staleCluster, systemType: "DGX-H100" }, 1);
+
+    await useSimulationStore.persist.rehydrate();
+
+    const state = useSimulationStore.getState();
+    // The stale cluster was dropped and rebuilt fresh with the current
+    // schema -- every HCA has a real model field and every port has real
+    // (non-undefined, non-NaN-prone) counter fields.
+    for (const node of state.cluster.nodes) {
+      for (const hca of node.hcas) {
+        expect(hca.model).toBeTruthy();
+        expect(hca.caType).not.toBe("ConnectX-7 HCA");
+        for (const port of hca.ports) {
+          expect(Number.isFinite(port.xmitDataBytes)).toBe(true);
+          expect(Number.isFinite(port.rcvDataBytes)).toBe(true);
+          expect(Number.isFinite(port.xmitPkts)).toBe(true);
+          expect(Number.isFinite(port.rcvPkts)).toBe(true);
+        }
+      }
+    }
+    // Progress the user earned is still preserved across the schema bump.
+    expect(state.completedScenarios).toEqual(["kept-scenario"]);
+  });
+});
+
+describe("setSystemType scenario guard (F8)", () => {
+  beforeEach(() => {
+    useSimulationStore.setState({ activeScenario: null });
+  });
+
+  it("ignores setSystemType while a scenario is active", () => {
+    useSimulationStore.setState({
+      activeScenario: { id: "test-scenario" } as unknown as Scenario,
+    });
+    const before = useSimulationStore.getState();
+    const beforeType = before.systemType;
+    const beforeCluster = before.cluster;
+
+    before.setSystemType(beforeType === "DGX-VR200" ? "DGX-A100" : "DGX-VR200");
+
+    const after = useSimulationStore.getState();
+    expect(after.systemType).toBe(beforeType);
+    expect(after.cluster).toBe(beforeCluster); // unchanged reference
+  });
+
+  it("switches systemType and rebuilds the cluster when no scenario is active", () => {
+    useSimulationStore.setState({ activeScenario: null });
+
+    useSimulationStore.getState().setSystemType("DGX-H100");
+
+    const after = useSimulationStore.getState();
+    expect(after.systemType).toBe("DGX-H100");
+    expect(after.cluster.nodes).toHaveLength(8);
+  });
+});
+
+describe("updateHCA action (K2 fault-injection infrastructure)", () => {
+  beforeEach(() => {
+    useSimulationStore.getState().resetSimulation();
+  });
+
+  it("updates a specific port's error counters on a specific HCA", () => {
+    const state = useSimulationStore.getState();
+    const node = state.cluster.nodes[0];
+    const hca = node.hcas[0];
+    const port = hca.ports[0];
+
+    state.updateHCA(node.id, hca.id, port.portNumber, {
+      errors: { ...port.errors, symbolErrors: 42 },
+    });
+
+    const updated = useSimulationStore
+      .getState()
+      .cluster.nodes.find((n) => n.id === node.id)!
+      .hcas.find((h) => h.id === hca.id)!
+      .ports.find((p) => p.portNumber === port.portNumber)!;
+    expect(updated.errors.symbolErrors).toBe(42);
+  });
+
+  it("updates a port's state and physicalState", () => {
+    const state = useSimulationStore.getState();
+    const node = state.cluster.nodes[0];
+    const hca = node.hcas[0];
+    const port = hca.ports[0];
+
+    state.updateHCA(node.id, hca.id, port.portNumber, {
+      state: "Down",
+      physicalState: "Polling",
+    });
+
+    const updated = useSimulationStore
+      .getState()
+      .cluster.nodes.find((n) => n.id === node.id)!
+      .hcas.find((h) => h.id === hca.id)!
+      .ports.find((p) => p.portNumber === port.portNumber)!;
+    expect(updated.state).toBe("Down");
+    expect(updated.physicalState).toBe("Polling");
+  });
+
+  it("does not touch other HCAs or other nodes", () => {
+    const state = useSimulationStore.getState();
+    const node = state.cluster.nodes[0];
+    const hca = node.hcas[0];
+    const port = hca.ports[0];
+
+    state.updateHCA(node.id, hca.id, port.portNumber, {
+      errors: { ...port.errors, symbolErrors: 7 },
+    });
+
+    const after = useSimulationStore.getState().cluster;
+    const otherHCAs = after.nodes[0].hcas.filter((h) => h.id !== hca.id);
+    for (const other of otherHCAs) {
+      expect(other.ports[0].errors.symbolErrors).toBe(0);
+    }
+    expect(after.nodes[1].hcas[0].ports[0].errors.symbolErrors).toBe(0);
+  });
+
+  it("no-ops safely (does not throw) for an unknown nodeId/hcaId/portNumber", () => {
+    const state = useSimulationStore.getState();
+    const errors = {
+      symbolErrors: 1,
+      linkDowned: 0,
+      portRcvErrors: 0,
+      portXmitDiscards: 0,
+      portXmitWait: 0,
+    };
+    expect(() =>
+      state.updateHCA("nonexistent-node", 0, 1, { errors }),
+    ).not.toThrow();
+    const nodeId = state.cluster.nodes[0].id;
+    expect(() => state.updateHCA(nodeId, 999, 1, { errors })).not.toThrow();
+    expect(() => state.updateHCA(nodeId, 0, 999, { errors })).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The metrics tick is ON by default on this line, and that is only correct
+// because Phase 3 is present: an injected fault is a persistent
+// activeFaultHeatWatts heat term, so ticking no longer normalizes the symptom
+// away before a learner can inspect it.
+//
+// release/phase1-2 deliberately ships `false` because it predates Phase 3.
+// This test is the counterpart of the one on that branch: whichever way a
+// merge resolves, one of the two fails loudly rather than silently shipping
+// the wrong default. Do not "fix" a failure here by flipping the value --
+// check which branch you are on and whether Phase 3's fault representation
+// exists.
+// ---------------------------------------------------------------------------
+describe("metrics tick default on the Phase 3+ line", () => {
+  it("runs the simulation by default, because faults now survive the tick", () => {
+    const initial = useSimulationStore.getInitialState
+      ? useSimulationStore.getInitialState()
+      : useSimulationStore.getState();
+    expect(initial.isRunning).toBe(true);
+  });
+});

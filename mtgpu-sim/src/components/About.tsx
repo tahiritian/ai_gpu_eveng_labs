@@ -1,0 +1,698 @@
+import {
+  Rocket,
+  Github,
+  Bug,
+  ChevronRight,
+  GitPullRequest,
+  Tag,
+  ExternalLink,
+  Sparkles,
+  Linkedin,
+  Shield,
+  Lock,
+  HelpCircle,
+} from "lucide-react";
+
+const CHANGELOG = [
+  {
+    version: "v1.7.0",
+    title: "Simulation Realism Overhaul",
+    current: true,
+    highlights: [
+      "One honest thermal model: temperature is driven by power in watts through a single smoothing path, so a full-load node settles around 70-75C, capping power measurably cools it, and an injected thermal fault holds its symptom until you actually remediate it instead of quietly evaporating",
+      "Physics now reaches scenario sandboxes, not just the global cluster — metrics tick and threshold events route from the cluster you are actually looking at, and a fresh load shows consistent idle values without pressing Start",
+      "Power management and flag truthfulness in nvidia-smi: per-architecture power-limit bounds, real clocks-throttle-reason and P-state reporting driven by engine state, ECC and compute-mode setters, and a consolidated --query-gpu field map that requires --format",
+      "Benchmarks detect sick hardware: corrected NCCL bus-bandwidth math (the old double ring factor inflated results ~1.75x), normalized FP bases so H100/H200 HPL peaks are right, and results that scale with downed NVLinks, throttled clocks, and capped power",
+      "InfiniBand devices have real identities — per-HCA mlx5_N names, unique GUIDs and LIDs instead of one shared placeholder — and ibstat/perfquery/ibping honor device and LID arguments, with a new ib-port-error fault and load-driven traffic counters",
+      "Slurm tells the truth: down nodes appear in sinfo, hostlists compress to dgx-[00-07], scontrol reports DRAIN and DRAIN+ALLOC states and requires a Reason, srun checks real node and GPU availability instead of always succeeding, and scancel is silent by default",
+      "In-scenario knowledge checks keep the answer explanation on screen until you click Continue, rather than pulling it away on a 1.5-second timer",
+      "Corrected exam, quiz, and scenario content across all five domains; dcgmi diag -r 4 support; terminal history, Ctrl+R, and ssh to newly added nodes fixed; help nvsm now resolves",
+    ],
+  },
+  {
+    version: "v1.6.1",
+    title: "Security & Review Hardening",
+    highlights: [
+      "Terminal input hardening: echo strips ANSI/control sequences, pipe chains reject empty segments and unknown filter stages, and a malformed pipeline is rejected before any command runs so it cannot apply side effects",
+      "Command parser treats a negative number following a value flag as that flag's value (nvidia-smi -i -5) instead of a malformed option",
+      "Persisted-state hardening: corrupted or future-version localStorage clusters are rebuilt on rehydrate, and switching architecture is blocked during an active scenario",
+      "nvidia-smi honors the short -p form of --reset-ecc-errors; awk pipe stages parse quoted scripts and ignore leading whitespace",
+      "Error boundary gains a Reset application data action; VR200 InfiniBand corrected to XDR 800Gb/s throughout",
+    ],
+  },
+  {
+    version: "v1.6.0",
+    title: "Sandbox Remediation & Onboarding",
+    highlights: [
+      "Sandbox remediation loop — fix injected GPU faults with real commands (nvidia-smi --gpu-reset / --reset-ecc-errors, systemctl restart nvidia-fabricmanager, ipmitool chassis power cycle) along a realistic escalation ladder",
+      "Physical-action panel: Reseat GPU, Reseat NVLink, and Mark for RMA — gated behind bug-report collection and a drained node, matching real datacenter procedure",
+      "Pure remediation engine models XID recoverability (reset-recoverable vs. power-cycle vs. RMA-only) and refuses shortcuts that would not work on real hardware",
+      "Sandbox onboarding: independent node selector, dismissible first-run intro, surprise-me random fault challenge, and clickable fault-toast commands that run in the terminal",
+      "Terminal welcome banners: variant-aware rendering (full vs. architecture) selected once per page load; mobile dynamic-viewport-height fix so the on-screen keyboard no longer covers the input",
+      "Simulator realism fixes (mlxconfig device resolution by exact path, ConnectX-7 MST path, benchmark --help scoping, nvbandwidth HBM ceiling from the hardware registry)",
+    ],
+  },
+  {
+    version: "v1.5.0",
+    title: "Mission Tracks & Networking Commands",
+    highlights: [
+      "Horizontal mission track layout for browsing scenarios by domain",
+      "8 new narrative scenarios (32 → 40 total)",
+      "23 new terminal commands: IB/RDMA diagnostics (ibstatus, ibv_devinfo, show_gids, rdma, ib_write_lat, ib_read_lat, ib_send_bw, ib_send_lat), NCCL collective benchmarks (nvbandwidth, p2pBandwidthLatencyTest, and 7 more *_perf tests), nvidia-persistenced, and networking tools (ethtool, netstat, ping, ss, traceroute)",
+      "Fixed argument-parsing and help/version bugs surfaced while wiring up the new commands (rdma, ping, traceroute, ethtool, nvidia-persistenced)",
+      "Regression test coverage added for all 23 new commands",
+    ],
+  },
+  {
+    version: "v1.4.0",
+    title: "Realism Audit",
+    highlights: [
+      "GPU UUID v4 format compliant with RFC 4122",
+      "Per-model thermal thresholds (A100: 92/89/85°C, H100+: 95/90/83°C)",
+      "SLURM GRES type derived from system type (gpu:h100:8, gpu:a100:8, etc.)",
+      "Dynamic CUDA paths from node hardware spec across env, nvcc, dpkg, apt, ldconfig",
+      "System-type-aware NCCL bandwidth and HPL TFLOPS baselines",
+      "Real gpu-burn output format with Gflop/s and temperature per GPU",
+      "nvidia-smi topo -m includes full NVLink legend",
+      "H100 NVSwitch full-mesh topology (all 4 switches connect to all 8 GPUs)",
+      "Reserved VRAM = 2% of total per GPU; DCGM version bumped to 3.3.5",
+    ],
+  },
+  {
+    version: "v1.3.1",
+    title: "Soft-Block Fixes",
+    highlights: [
+      "Show Answer button lets stuck users reveal commands and skip steps",
+      "Pipe validation enforced — piped commands now check filtered output",
+      "squeue -w flag filters jobs by nodelist",
+      "journalctl -u opensmd returns realistic subnet manager logs",
+      "Fixed narrative data errors across 5 scenarios",
+    ],
+  },
+  {
+    version: "v1.3.0",
+    title: "User Feedback",
+    highlights: [
+      "Feedback form in header — submit general feedback, bug reports, or success stories",
+      "Authenticated submission via Cognito to prevent spam",
+    ],
+  },
+  {
+    version: "v1.2.3",
+    title: "Quiz Stats & Dashboard Toggle",
+    highlights: [
+      "Tool Selection quiz scores display as percentages instead of raw counts",
+      "Exam stats (Exams Taken, Avg Score, Pass Rate) include all quiz types",
+      "Pass rate uses quiz-specific thresholds (80% Tool Selection, 75% Deep Mastery)",
+      "Cluster/Terminal toggle in mission mode with dashboard update indicator",
+      "Mobile: auto-switch to terminal on scenario start, horizontal scroll for output",
+      "Store versioning with migration support for learningProgressStore",
+    ],
+  },
+  {
+    version: "v1.2.2",
+    title: "Audit Fixes & Scoring Pipeline",
+    highlights: [
+      "Exam scoring pipeline: real breakdown persisted and recorded in analytics",
+      "Fixed readiness benchmark showing inflated percentiles (6500% → 65%)",
+      "Scenario sandbox: snapshot/restore cluster instead of resetting to defaults",
+      "Terminal scenario context rebinds on scenario start/stop",
+      "Removed gauntlet self-certification (Mark Complete without validation)",
+      "Question flagging now persists to store",
+    ],
+  },
+  {
+    version: "v1.2.1",
+    title: "Polish & Security",
+    highlights: [
+      "Security & Privacy section with AWS hosting details",
+      "Terminal session persistence across tab switches",
+      "Fixed double-dash flag rendering in Commands Reference",
+      "nvidia-smi formatter consistency fixes",
+      "Version consistency across all surfaces",
+    ],
+  },
+  {
+    version: "v1.2.0",
+    title: "UX Overhaul & New Architectures",
+    highlights: [
+      "Inline MissionCard replaces sidebar: click-to-paste commands, quiz gating, mount animation",
+      "NarrativeIntro popup with skip option for Linux basics tutorials",
+      "6 DGX architectures: added GB200 (Blackwell Ultra) and VR200 (Vera Rubin)",
+      "Data-driven simulator output: all architecture-specific logic reads from spec registry",
+      "nvidia-smi ERR! display for GPUs with Critical health status",
+      "E2E test suite: 307 Playwright tests across 7 spec files",
+    ],
+  },
+  {
+    version: "v1.1.0",
+    title: "Authentication & Cloud Sync",
+    highlights: [
+      "User authentication with AWS Cognito (sign up, sign in, email verification)",
+      "Cloud sync: progress, quiz scores, and learning data saved across devices",
+      "Guided onboarding tour updated with Account & Cloud Sync step",
+      "Small screen warning banner for viewports below 1280px",
+      "Renamed project to Data Center Lab Simulator across all surfaces",
+    ],
+  },
+  {
+    version: "v1.0.0",
+    title: "Official Release",
+    highlights: [
+      "20 command simulators with 229 CLI definitions across 17 categories",
+      "32 story-driven scenarios with sandbox isolation and auto-fault injection",
+      "199 exam questions, 60 tool selection quizzes, and 150 deep mastery quizzes",
+      "Multi-architecture support: DGX A100, H100, H200, B200, GB200, and VR200",
+      "3,200+ unit tests with full CI/CD pipeline",
+    ],
+  },
+  {
+    version: "v0.11.0",
+    title: "Pre-Launch Polish",
+    highlights: [
+      "OpenGraph meta tags for rich LinkedIn/social media link previews",
+      "Horizontal scroll header for narrow viewports",
+      "Terminal text formatting fixes for all viewport sizes",
+      "Expanded Tool Selection (10 questions) and Deep Mastery (25 questions) quiz pools",
+    ],
+  },
+  {
+    version: "v0.10.0",
+    title: "Exams Dashboard",
+    highlights: [
+      "Comprehensive Exams tab with readiness stats, exam history, and domain performance",
+      "Data-driven exam mode registry: Full Practice, Quick Quiz, Gauntlet, Weak Area, Review Mistakes",
+      "Tool Mastery Quizzes for all 6 command families accessible from Exams tab",
+      "ExamWorkspace supports all 5 exam engine modes with configurable time limits",
+      "Responsive mission sidebar and display adaptivity improvements",
+    ],
+  },
+  {
+    version: "v0.9.2",
+    title: "Polish & Educational Enrichment",
+    highlights: [
+      "Fault Injection educational toasts, info panels, and XID modal",
+      "Virtual file system relative path resolution (cd + cat/ls/head/tail)",
+      "Verbose --help mode with 'more' keyword for full untruncated output",
+      "Legal disclaimer and NVIDIA trademark attribution",
+    ],
+  },
+  {
+    version: "v0.9.0",
+    title: "Sandbox & Multi-Architecture",
+    highlights: [
+      "ScenarioContext isolation for per-scenario sandbox state",
+      "DGX A100, H100, H200, B200, GB200, and VR200 hardware support",
+      "Spotlight tour for guided onboarding",
+      "CI/CD pipeline with lint, test, and build checks",
+    ],
+  },
+  {
+    version: "v0.8.0",
+    title: "Code Quality",
+    highlights: [
+      "20-task improvement plan from codebase audit",
+      "ESLint zero errors and warnings",
+      "CommandRouter refactor for maintainability",
+      "Lazy loading for improved initial load",
+    ],
+  },
+  {
+    version: "v0.7.0",
+    title: "Narrative Scenarios",
+    highlights: [
+      "32 story-driven scenarios across all 5 domains",
+      "NarrativeIntro mission briefing screen",
+      "InlineQuiz for in-scenario knowledge checks",
+      "NarrativeResolution with debrief and scoring",
+    ],
+  },
+  {
+    version: "v0.6.0",
+    title: "UI Consolidation",
+    highlights: [
+      "Four-tab navigation (Simulator, Labs, Documentation)",
+      "ReferenceTab with unified command lookup",
+      "XID error code reference database",
+    ],
+  },
+  {
+    version: "v0.5.0",
+    title: "Learning Phases 2\u20134",
+    highlights: [
+      "Spaced repetition with SM-2 algorithm",
+      "Three-tier progression (Guided \u2192 Choice \u2192 Realistic)",
+      "ExamGauntlet timed random testing",
+    ],
+  },
+  {
+    version: "v0.4.0",
+    title: "CLI Architecture",
+    highlights: [
+      "JSON-based command definitions",
+      "Registry-based validation system",
+      "Structured command parsing and routing",
+    ],
+  },
+  {
+    version: "v0.3.0",
+    title: "Learning System",
+    highlights: [
+      "Study Dashboard with progress tracking",
+      "Quiz questions for 6 command families",
+      "LearningPaths tab interface",
+      "2,900+ unit tests",
+    ],
+  },
+  {
+    version: "v0.2.0",
+    title: "Interactive Features",
+    highlights: [
+      "GPU benchmarking simulator",
+      "MIG configurator",
+      "Slurm job visualizer",
+      "InfiniBand cable tracer",
+    ],
+  },
+  {
+    version: "v0.1.0",
+    title: "Foundation",
+    highlights: [
+      "Core terminal simulator with xterm.js",
+      "D3.js network topology visualization",
+      "Zustand state management stores",
+      "DGX cluster modeling with GPU/NVLink/IB state",
+    ],
+  },
+];
+
+const REPO_URL = "https://github.com/Seanbo5386/dc-lab-sim";
+
+export function About() {
+  return (
+    <div className="h-full flex flex-col">
+      {/* Header */}
+      <div className="bg-gray-800 border-b border-gray-700 px-6 py-4">
+        <h2 className="text-xl font-bold text-nvidia-green">About</h2>
+        <p className="text-sm text-gray-400 mt-1">
+          Project background, how to contribute, and version history
+        </p>
+      </div>
+
+      {/* Scrollable Content */}
+      <div className="flex-1 overflow-y-auto p-6 space-y-8">
+        {/* Motivation */}
+        <section data-tour="about-motivation">
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-3">
+            <Rocket className="w-5 h-5 text-nvidia-green" />
+            Motivation
+          </h3>
+          <div className="bg-gray-800 rounded-lg p-5 space-y-3 text-gray-300 text-sm leading-relaxed">
+            <p>
+              The{" "}
+              <span className="text-white font-medium">
+                Data Center Lab Simulator
+              </span>{" "}
+              is a browser-based training environment for the{" "}
+              <span className="text-nvidia-green font-medium">
+                NCP-AII certification exam
+              </span>
+              . It lets you practice datacenter administration commands and
+              troubleshooting workflows without needing physical DGX hardware.
+            </p>
+            <p>
+              The simulator covers the full exam blueprint across all five
+              domains: Systems & Server Bring-Up, Physical Layer Management,
+              Control Plane Installation, Cluster Test & Verification, and
+              Troubleshooting & Optimization.
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2">
+              {[
+                { label: "Scenarios", value: "40" },
+                { label: "Domains", value: "5" },
+                { label: "Exam Questions", value: "199" },
+                { label: "Command Families", value: "7" },
+              ].map((stat) => (
+                <div
+                  key={stat.label}
+                  className="bg-gray-900 rounded-lg p-3 text-center"
+                >
+                  <div className="text-xl font-bold text-nvidia-green">
+                    {stat.value}
+                  </div>
+                  <div className="text-xs text-gray-400">{stat.label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* Contribute & Feedback */}
+        <section data-tour="about-contribute">
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-3">
+            <Github className="w-5 h-5 text-nvidia-green" />
+            Contribute & Feedback
+          </h3>
+          <div className="bg-gray-800 rounded-lg p-5 space-y-4 text-sm">
+            <p className="text-gray-300 leading-relaxed">
+              This project is open source. Contributions, bug reports, and
+              feature requests are welcome.
+            </p>
+            <div className="space-y-3">
+              <a
+                href={REPO_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                data-testid="github-link"
+                className="flex items-center gap-2 text-nvidia-green hover:text-green-400 transition-colors"
+              >
+                <ExternalLink className="w-4 h-4" />
+                GitHub Repository
+              </a>
+              <a
+                href="https://www.linkedin.com/in/sean-m-woods/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-nvidia-green hover:text-green-400 transition-colors"
+              >
+                <Linkedin className="w-4 h-4" />
+                Sean Woods — Project Lead
+              </a>
+              <div className="flex items-start gap-2 text-gray-400">
+                <Bug className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>
+                  Found a bug or have feedback? Open an{" "}
+                  <a
+                    href={`${REPO_URL}/issues`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-nvidia-green hover:text-green-400 transition-colors underline"
+                  >
+                    issue
+                  </a>{" "}
+                  on GitHub.
+                </span>
+              </div>
+              <div className="flex items-start gap-2 text-gray-400">
+                <GitPullRequest className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>
+                  Want to contribute? Fork the repo, create a branch, and submit
+                  a pull request.
+                </span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Legal Disclaimer */}
+        <section data-tour="about-legal">
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-3">
+            <Shield className="w-5 h-5 text-nvidia-green" />
+            Legal Disclaimer
+          </h3>
+          <div className="bg-gray-800 rounded-lg p-5 text-sm text-gray-400 leading-relaxed space-y-3">
+            <p>
+              NVIDIA, the NVIDIA logo, DGX, DGX A100, DGX H100, DGX H200, DGX
+              B200, DGX GB200, DGX VR200, A100, H100, H200, B200, GB200, R200,
+              NVLink, NVSwitch, InfiniBand, Mellanox, ConnectX, BlueField, CUDA,
+              DCGM, NCCL, and NVSM are trademarks and/or registered trademarks
+              of{" "}
+              <span className="text-white font-medium">NVIDIA Corporation</span>{" "}
+              in the United States and other countries.
+            </p>
+            <p>
+              This project is an{" "}
+              <span className="text-white font-medium">
+                independent, community-built educational tool
+              </span>{" "}
+              and is <span className="text-white font-medium">not</span>{" "}
+              developed, endorsed, certified, or affiliated with NVIDIA
+              Corporation in any way. The NCP-AII certification exam is
+              administered solely by NVIDIA, and this simulator makes no
+              guarantees about exam content, accuracy, or outcomes.
+            </p>
+            <p>
+              All simulated command outputs, hardware specifications, and
+              diagnostic data are approximations created for{" "}
+              <span className="text-white font-medium">
+                educational purposes only
+              </span>{" "}
+              and may not reflect the exact behavior of real NVIDIA hardware or
+              software. Users should always refer to official NVIDIA
+              documentation for authoritative technical information.
+            </p>
+            <p>
+              Exam content, format, and objectives may be updated by NVIDIA at
+              any time. This simulator may not reflect the most current exam
+              material and is intended to{" "}
+              <span className="text-white font-medium">
+                supplement, not replace
+              </span>
+              , official NVIDIA training materials and documentation.
+            </p>
+            <p>
+              This software is provided{" "}
+              <span className="text-white font-medium">
+                &quot;as is&quot; without warranty of any kind
+              </span>
+              , express or implied, including but not limited to the warranties
+              of merchantability, fitness for a particular purpose, and
+              noninfringement. In no event shall the authors or copyright
+              holders be liable for any claim, damages, or other liability
+              arising from the use of this software, including but not limited
+              to exam results or certification outcomes.
+            </p>
+            <p>
+              All other trademarks referenced herein are the property of their
+              respective owners. Slurm is a trademark of SchedMD LLC. Linux is a
+              registered trademark of Linus Torvalds. Docker is a trademark of
+              Docker, Inc.
+            </p>
+          </div>
+        </section>
+
+        {/* Security & Privacy */}
+        <section>
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-3">
+            <Lock className="w-5 h-5 text-nvidia-green" />
+            Security & Privacy
+          </h3>
+          <div className="bg-gray-800 rounded-lg p-5 text-sm text-gray-300 leading-relaxed space-y-2">
+            <p>
+              Your data is handled with care. Here's how we keep things secure:
+            </p>
+            <ul className="space-y-2 mt-3">
+              <li className="flex items-start gap-2">
+                <span className="text-nvidia-green mt-0.5 shrink-0">
+                  &#x2713;
+                </span>
+                <span>
+                  <span className="text-white font-medium">
+                    HTTPS everywhere
+                  </span>{" "}
+                  &mdash; hosted on AWS Amplify with TLS encryption for all
+                  traffic
+                </span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-nvidia-green mt-0.5 shrink-0">
+                  &#x2713;
+                </span>
+                <span>
+                  <span className="text-white font-medium">
+                    AWS Cognito authentication
+                  </span>{" "}
+                  &mdash; passwords are managed by AWS, never stored by the
+                  application
+                </span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-nvidia-green mt-0.5 shrink-0">
+                  &#x2713;
+                </span>
+                <span>
+                  <span className="text-white font-medium">
+                    Owner-scoped data access
+                  </span>{" "}
+                  &mdash; progress data is stored in AWS DynamoDB with
+                  encryption at rest, and only you can access your own records
+                </span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-nvidia-green mt-0.5 shrink-0">
+                  &#x2713;
+                </span>
+                <span>
+                  <span className="text-white font-medium">
+                    Minimal data collection
+                  </span>{" "}
+                  &mdash; only your email is collected for account creation; no
+                  tracking, analytics, or third-party data sharing
+                </span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-nvidia-green mt-0.5 shrink-0">
+                  &#x2713;
+                </span>
+                <span>
+                  <span className="text-white font-medium">
+                    Client-side simulation
+                  </span>{" "}
+                  &mdash; all terminal commands run locally in your browser;
+                  nothing is sent to a server
+                </span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="text-nvidia-green mt-0.5 shrink-0">
+                  &#x2713;
+                </span>
+                <span>
+                  <span className="text-white font-medium">Open source</span>{" "}
+                  &mdash; the full codebase is{" "}
+                  <a
+                    href={REPO_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-nvidia-green hover:text-green-400 transition-colors underline"
+                  >
+                    publicly auditable on GitHub
+                  </a>
+                </span>
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        {/* FAQ */}
+        <section>
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-3">
+            <HelpCircle className="w-5 h-5 text-nvidia-green" />
+            FAQ
+          </h3>
+          <div className="bg-gray-800 rounded-lg p-5 space-y-4 text-sm">
+            {[
+              {
+                q: "How do I prepare for the NCP-AII exam?",
+                a: "Focus on hands-on CLI skills across the 5 exam domains. The heaviest domains are Cluster Test & Verification (33%) and Systems Bring-Up (31%). Use the Labs tab to work through guided scenarios, then test yourself in Exams. The spaced-repetition system will schedule reviews for commands you've practiced.",
+              },
+              {
+                q: "Is this an official NVIDIA training resource?",
+                a: "No. This is an independent, community-built practice tool. It is not affiliated with, endorsed by, or certified by NVIDIA. Always refer to official NVIDIA documentation and training for authoritative exam content.",
+              },
+              {
+                q: "What's the difference between NCA-AIIO, NCP-AII, and NCP-AIO?",
+                a: "NCA-AIIO (AI Infrastructure & Operations) is the associate-level fundamentals cert. NCP-AII (AI Infrastructure) and NCP-AIO (AI Operations) are professional-level certs requiring deeper hands-on expertise. This simulator focuses on NCP-AII — the infrastructure side.",
+              },
+              {
+                q: "What commands does the simulator cover?",
+                a: "145 live terminal commands across 7 families: GPU monitoring (nvidia-smi, dcgmi, nvsm), InfiniBand tools (ibstat, iblinkinfo, perfquery), BMC/hardware (ipmitool, sensors, dmidecode), cluster tools (sinfo, squeue, scontrol), containers (docker, enroot, nvidia-container-cli), diagnostics (dcgmi diag, gpu-burn), and XID diagnostics. Reference docs cover 229 commands total, including additional ones you can look up but can't yet run interactively.",
+              },
+            ].map(({ q, a }) => (
+              <details key={q} className="group">
+                <summary className="cursor-pointer text-white font-medium flex items-center gap-2 list-none [&::-webkit-details-marker]:hidden">
+                  <ChevronRight className="w-4 h-4 text-gray-400 transition-transform group-open:rotate-90 shrink-0" />
+                  {q}
+                </summary>
+                <p className="text-gray-300 leading-relaxed mt-2 ml-6">{a}</p>
+              </details>
+            ))}
+          </div>
+        </section>
+
+        {/* Special Thanks */}
+        <section data-tour="about-credits" className="pb-4">
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-3">
+            <Sparkles className="w-5 h-5 text-nvidia-green" />
+            Special Thanks
+          </h3>
+          <div className="bg-gray-800 rounded-lg p-5 text-sm text-gray-300 leading-relaxed">
+            <p>
+              This project was built in partnership with{" "}
+              <a
+                href="https://www.anthropic.com/claude-code"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-nvidia-green font-medium hover:text-green-400 transition-colors underline"
+              >
+                Claude Code
+              </a>
+              , powered by{" "}
+              <span className="text-nvidia-green font-medium">
+                Anthropic's Claude Opus 4.6
+              </span>
+              . Architecture design, test scaffolding, scenario authoring, and
+              iterative debugging were all done through AI-assisted pair
+              programming.
+            </p>
+            <p className="mt-3 text-gray-400">
+              Thanks to NVIDIA for the NCP-AII certification program and the
+              public documentation that made this simulator possible.
+            </p>
+          </div>
+        </section>
+
+        {/* Changelog */}
+        <section data-tour="about-changelog" className="pb-4">
+          <details className="group">
+            <summary className="text-lg font-semibold text-white flex items-center gap-2 mb-3 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+              <Tag className="w-5 h-5 text-nvidia-green" />
+              Changelog
+              <ChevronRight className="w-4 h-4 text-gray-400 transition-transform group-open:rotate-90" />
+            </summary>
+            <div className="space-y-0">
+              {CHANGELOG.map((entry, i) => (
+                <div key={entry.version} className="flex gap-4">
+                  {/* Timeline line */}
+                  <div className="flex flex-col items-center">
+                    <div
+                      className={`w-3 h-3 rounded-full shrink-0 mt-1.5 ${
+                        entry.current
+                          ? "bg-nvidia-green ring-2 ring-nvidia-green ring-offset-2 ring-offset-gray-900"
+                          : "bg-gray-600"
+                      }`}
+                    />
+                    {i < CHANGELOG.length - 1 && (
+                      <div className="w-px flex-1 bg-gray-700 my-1" />
+                    )}
+                  </div>
+
+                  {/* Content */}
+                  <div className="pb-6 flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span
+                        className={`font-mono text-sm font-bold ${
+                          entry.current ? "text-nvidia-green" : "text-gray-300"
+                        }`}
+                        data-testid={
+                          entry.current ? "current-version" : undefined
+                        }
+                      >
+                        {entry.version}
+                      </span>
+                      <span className="text-sm text-gray-400">
+                        {entry.title}
+                      </span>
+                      {entry.current && (
+                        <span className="text-xs bg-nvidia-green text-black px-1.5 py-0.5 rounded font-medium">
+                          current
+                        </span>
+                      )}
+                    </div>
+                    <ul className="text-xs text-gray-400 space-y-0.5">
+                      {entry.highlights.map((h) => (
+                        <li key={h} className="flex items-start gap-1.5">
+                          <span className="text-gray-600 mt-0.5">&#x2022;</span>
+                          {h}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </details>
+        </section>
+      </div>
+    </div>
+  );
+}

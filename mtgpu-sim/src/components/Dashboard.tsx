@@ -1,0 +1,816 @@
+import React, {
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
+import { useSimulationStore } from "@/store/simulationStore";
+import { scenarioContextManager } from "@/store/scenarioContext";
+import { resolveEffectiveCluster } from "@/utils/effectiveState";
+import { deriveThermalSeverity } from "@/simulation/clusterPhysicsEngine";
+import {
+  Activity,
+  HardDrive,
+  Thermometer,
+  Zap,
+  AlertTriangle,
+  CheckCircle,
+  XCircle,
+  TrendingUp,
+  Network,
+  Activity as ActivityIcon,
+  ChevronDown,
+} from "lucide-react";
+import type { GPU, HealthStatus } from "@/types/hardware";
+const MetricsChart = React.lazy(() =>
+  import("./MetricsChart").then((m) => ({ default: m.MetricsChart })),
+);
+import { TopologyGraph } from "./TopologyGraph";
+import { InfiniBandMap } from "./InfiniBandMap";
+import { FabricHealthSummary } from "./FabricHealthSummary";
+import { MetricsHistory } from "@/utils/metricsHistory";
+import {
+  getVisualizationContext,
+  VisualizationContext,
+} from "@/utils/scenarioVisualizationMap";
+import { ALL_SYSTEM_TYPES, getSystemDisplayName } from "@/data/hardwareSpecs";
+import type { SystemType } from "@/data/hardwareSpecs";
+
+/**
+ * Hook that returns the effective cluster for Dashboard components.
+ * When a ScenarioContext is active, returns its isolated cluster;
+ * otherwise falls back to the global store cluster.
+ * Polls at 200ms for mutation reactivity.
+ */
+function useEffectiveCluster() {
+  const globalCluster = useSimulationStore((state) => state.cluster);
+  const [scenarioVersion, setScenarioVersion] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const ctx = scenarioContextManager.getActiveContext();
+      if (ctx) {
+        setScenarioVersion(ctx.getMutationCount());
+      }
+    }, 200);
+    return () => clearInterval(interval);
+  }, []);
+
+  const effectiveCluster = useMemo(() => {
+    const activeContext = scenarioContextManager.getActiveContext();
+    return activeContext ? activeContext.getCluster() : globalCluster;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalCluster, scenarioVersion]);
+
+  return effectiveCluster;
+}
+
+const HealthIndicator: React.FC<{ status: HealthStatus }> = ({ status }) => {
+  const config = {
+    OK: {
+      icon: CheckCircle,
+      color: "text-green-500",
+      bg: "bg-green-500/20",
+      label: "Status: OK - System healthy",
+    },
+    Warning: {
+      icon: AlertTriangle,
+      color: "text-yellow-500",
+      bg: "bg-yellow-500/20",
+      label: "Status: Warning - Attention needed",
+    },
+    Critical: {
+      icon: XCircle,
+      color: "text-red-500",
+      bg: "bg-red-500/20",
+      label: "Status: Critical - Immediate action required",
+    },
+    Unknown: {
+      icon: AlertTriangle,
+      color: "text-gray-500",
+      bg: "bg-gray-500/20",
+      label: "Status: Unknown",
+    },
+  };
+
+  const { icon: Icon, color, bg, label } = config[status];
+
+  return (
+    <div
+      role="status"
+      aria-label={label}
+      className={`flex items-center gap-2 px-3 py-1 rounded-full ${bg}`}
+    >
+      <Icon className={`w-4 h-4 ${color}`} aria-hidden="true" />
+      <span className={`text-sm font-medium ${color}`}>{status}</span>
+    </div>
+  );
+};
+
+const GPUCard: React.FC<{ gpu: GPU; nodeId: string }> = ({ gpu }) => {
+  // Temperature status with color AND text alternatives for accessibility (WCAG 1.4.1)
+  const getTempStatus = (temp: number) => {
+    const { severity, label } = deriveThermalSeverity(temp, gpu.name);
+    if (severity === "critical")
+      return {
+        color: "text-red-500",
+        symbol: "✕",
+        label,
+        ariaLabel: `Temperature critical: ${Math.round(temp)} degrees Celsius`,
+      };
+    if (severity === "warning")
+      return {
+        color: "text-yellow-500",
+        symbol: "⚠",
+        label,
+        ariaLabel: `Temperature warning: ${Math.round(temp)} degrees Celsius`,
+      };
+    return {
+      color: "text-green-500",
+      symbol: "✓",
+      label,
+      ariaLabel: `Temperature normal: ${Math.round(temp)} degrees Celsius`,
+    };
+  };
+  const tempStatus = getTempStatus(gpu.temperature);
+  const memoryPercent = (gpu.memoryUsed / gpu.memoryTotal) * 100;
+
+  return (
+    <div className="bg-gray-800 rounded-lg p-3 border border-gray-700 hover:border-nvidia-green transition-colors min-w-0">
+      <div className="flex items-center justify-between mb-1">
+        <h3 className="text-sm font-semibold text-nvidia-green">
+          GPU {gpu.id}
+        </h3>
+        <HealthIndicator status={gpu.healthStatus} />
+      </div>
+      <p className="text-xs text-gray-400 truncate mb-3">{gpu.name}</p>
+
+      <div className="space-y-2">
+        {/* Utilization */}
+        <div>
+          <div className="flex items-center justify-between text-xs mb-1">
+            <span className="flex items-center gap-1 text-gray-400">
+              <Activity className="w-3 h-3" />
+              Utilization
+            </span>
+            <span className="text-nvidia-green font-medium">
+              {Math.round(gpu.utilization)}%
+            </span>
+          </div>
+          <div className="gpu-bar-container">
+            <div className="gpu-bar" style={{ width: `${gpu.utilization}%` }} />
+          </div>
+        </div>
+
+        {/* Memory */}
+        <div>
+          <div className="flex items-center justify-between text-xs mb-1">
+            <span className="flex items-center gap-1 text-gray-400">
+              <HardDrive className="w-3 h-3" />
+              Memory
+            </span>
+            <span className="text-nvidia-green font-medium whitespace-nowrap">
+              {(gpu.memoryUsed / 1024).toFixed(1)}/
+              {(gpu.memoryTotal / 1024).toFixed(0)}GB
+            </span>
+          </div>
+          <div className="gpu-bar-container">
+            <div
+              className="gpu-bar bg-blue-500"
+              style={{ width: `${memoryPercent}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Temperature and Power */}
+        <div className="flex flex-wrap gap-x-4 gap-y-1 pt-2 border-t border-gray-700">
+          <div
+            className="flex items-center gap-1.5"
+            role="status"
+            aria-label={tempStatus.ariaLabel}
+          >
+            <Thermometer
+              className={`w-3.5 h-3.5 ${tempStatus.color}`}
+              aria-hidden="true"
+            />
+            <span className={`text-xs font-medium ${tempStatus.color}`}>
+              <span aria-hidden="true">{tempStatus.symbol} </span>
+              {Math.round(gpu.temperature)}°C
+            </span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Zap className="w-3.5 h-3.5 text-yellow-500" />
+            <span className="text-xs font-medium text-yellow-500">
+              {Math.round(gpu.powerDraw)}W/{gpu.powerLimit}W
+            </span>
+          </div>
+        </div>
+
+        {/* MIG Status */}
+        {gpu.migMode && (
+          <div className="pt-2 border-t border-gray-700">
+            <div className="text-xs text-nvidia-green">
+              MIG Enabled: {gpu.migInstances.length} instance(s)
+            </div>
+          </div>
+        )}
+
+        {/* XID Errors */}
+        {gpu.xidErrors.length > 0 && (
+          <div className="pt-2 border-t border-red-900/50">
+            <div className="text-xs text-red-500 font-medium">
+              ⚠ {gpu.xidErrors.length} XID Error(s)
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const NodeSelector: React.FC = () => {
+  const effectiveCluster = useEffectiveCluster();
+  const selectedNode = useSimulationStore((state) => state.selectedNode);
+  const selectNode = useSimulationStore((state) => state.selectNode);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Auto-select first node when none is selected
+  useEffect(() => {
+    if (!selectedNode && effectiveCluster.nodes.length > 0) {
+      selectNode(effectiveCluster.nodes[0].id);
+    }
+  }, [selectedNode, effectiveCluster.nodes, selectNode]);
+
+  const handleKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+      const nodeCount = effectiveCluster.nodes.length;
+      let newIndex: number | null = null;
+
+      switch (event.key) {
+        case "ArrowRight":
+        case "ArrowDown":
+          event.preventDefault();
+          newIndex = (index + 1) % nodeCount;
+          break;
+        case "ArrowLeft":
+        case "ArrowUp":
+          event.preventDefault();
+          newIndex = (index - 1 + nodeCount) % nodeCount;
+          break;
+        case "Home":
+          event.preventDefault();
+          newIndex = 0;
+          break;
+        case "End":
+          event.preventDefault();
+          newIndex = nodeCount - 1;
+          break;
+        default:
+          return;
+      }
+
+      if (newIndex !== null) {
+        const newNode = effectiveCluster.nodes[newIndex];
+        selectNode(newNode.id);
+        buttonRefs.current[newIndex]?.focus();
+      }
+    },
+    [effectiveCluster.nodes, selectNode],
+  );
+
+  return (
+    <div
+      ref={containerRef}
+      role="tablist"
+      aria-label="Node selection"
+      className="flex gap-1.5 overflow-x-auto pb-2"
+    >
+      {effectiveCluster.nodes.map((node, index) => {
+        const isSelected = selectedNode === node.id;
+        return (
+          <button
+            key={node.id}
+            ref={(el) => {
+              buttonRefs.current[index] = el;
+            }}
+            role="tab"
+            aria-selected={isSelected}
+            tabIndex={isSelected ? 0 : -1}
+            onClick={() => selectNode(node.id)}
+            onKeyDown={(e) => handleKeyDown(e, index)}
+            className={`px-3 py-1.5 rounded-lg font-medium text-sm whitespace-nowrap transition-colors shrink-0 ${
+              isSelected
+                ? "bg-nvidia-green text-black"
+                : "bg-gray-800 text-gray-300 hover:bg-gray-700"
+            }`}
+          >
+            {node.id}
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
+const SystemTypeSelector: React.FC = () => {
+  const systemType = useSimulationStore((state) => state.systemType);
+  const setSystemType = useSimulationStore((state) => state.setSystemType);
+  const activeScenario = useSimulationStore((state) => state.activeScenario);
+
+  return (
+    <div className="flex items-center gap-2">
+      <label htmlFor="system-type-select" className="text-xs text-gray-400">
+        Architecture:
+      </label>
+      <select
+        id="system-type-select"
+        value={systemType}
+        onChange={(e) => setSystemType(e.target.value as SystemType)}
+        disabled={!!activeScenario}
+        className="bg-gray-700 text-sm text-gray-200 border border-gray-600 rounded px-2 py-1
+                   focus:outline-none focus:border-nvidia-green disabled:opacity-50 disabled:cursor-not-allowed"
+        title={
+          activeScenario
+            ? "Cannot change architecture during an active scenario"
+            : "Select DGX system architecture"
+        }
+      >
+        {ALL_SYSTEM_TYPES.map((type) => (
+          <option key={type} value={type}>
+            {getSystemDisplayName(type)}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+};
+
+const ClusterHealthSummary: React.FC = () => {
+  const effectiveCluster = useEffectiveCluster();
+  const selectNode = useSimulationStore((state) => state.selectNode);
+  const [alertExpanded, setAlertExpanded] = useState(false);
+
+  const totalNodes = effectiveCluster.nodes.length;
+  const totalGPUs = effectiveCluster.nodes.reduce(
+    (sum, node) => sum + (node?.gpus?.length ?? 0),
+    0,
+  );
+  const healthyGPUs = effectiveCluster.nodes.reduce(
+    (sum, node) =>
+      sum +
+      (node?.gpus?.filter((gpu) => gpu.healthStatus === "OK").length ?? 0),
+    0,
+  );
+  const criticalGPUs = effectiveCluster.nodes.reduce(
+    (sum, node) =>
+      sum +
+      (node?.gpus?.filter((gpu) => gpu.healthStatus === "Critical").length ??
+        0),
+    0,
+  );
+
+  // Gather critical GPU details for expandable view
+  const criticalGPUDetails = effectiveCluster.nodes.flatMap((node) =>
+    node.gpus
+      .filter((gpu) => gpu.healthStatus === "Critical")
+      .map((gpu) => ({
+        nodeId: node.id,
+        gpuId: gpu.id,
+        gpuName: gpu.name,
+        issue:
+          gpu.xidErrors.length > 0
+            ? `XID Error ${gpu.xidErrors[0].code}`
+            : gpu.temperature > 85
+              ? `Overheating (${Math.round(gpu.temperature)}°C)`
+              : "Health Critical",
+      })),
+  );
+
+  const overallHealth: HealthStatus =
+    criticalGPUs > 0 ? "Critical" : healthyGPUs < totalGPUs ? "Warning" : "OK";
+
+  return (
+    <div className="bg-gradient-to-br from-gray-800 to-gray-900 rounded-lg p-4 md:p-6 border border-gray-700">
+      <div className="flex flex-wrap items-center gap-2 mb-4">
+        <h2 className="text-lg md:text-xl font-bold text-nvidia-green">
+          Cluster Health
+        </h2>
+        <SystemTypeSelector />
+        <div className="ml-auto">
+          <HealthIndicator status={overallHealth} />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-4">
+        <div className="bg-gray-800/50 rounded-lg p-2 md:p-4">
+          <div className="text-lg md:text-2xl font-bold text-nvidia-green">
+            {totalNodes}/{totalNodes}
+          </div>
+          <div className="text-xs md:text-sm text-gray-400">Nodes Online</div>
+        </div>
+
+        <div className="bg-gray-800/50 rounded-lg p-2 md:p-4">
+          <div className="text-lg md:text-2xl font-bold text-nvidia-green">
+            {healthyGPUs}/{totalGPUs}
+          </div>
+          <div className="text-xs md:text-sm text-gray-400">GPUs Healthy</div>
+        </div>
+
+        <div
+          className="bg-gray-800/50 rounded-lg p-2 md:p-4"
+          role="status"
+          aria-label="InfiniBand status: Active"
+        >
+          <div className="text-lg md:text-2xl font-bold text-nvidia-green">
+            <span aria-hidden="true">✓ </span>Active
+          </div>
+          <div className="text-xs md:text-sm text-gray-400">InfiniBand</div>
+        </div>
+
+        <div
+          className="bg-gray-800/50 rounded-lg p-2 md:p-4"
+          role="status"
+          aria-label={`BCM HA state: ${effectiveCluster.bcmHA.state}`}
+        >
+          <div className="text-lg md:text-2xl font-bold text-nvidia-green">
+            <span aria-hidden="true">✓ </span>
+            {effectiveCluster.bcmHA.state}
+          </div>
+          <div className="text-xs md:text-sm text-gray-400">BCM HA</div>
+        </div>
+      </div>
+
+      {criticalGPUs > 0 && (
+        <div
+          className="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg cursor-pointer hover:bg-red-500/20 transition-colors"
+          onClick={() => setAlertExpanded(!alertExpanded)}
+        >
+          <div className="flex items-center justify-between text-sm text-red-400 font-medium">
+            <span>
+              ⚠ {criticalGPUs} GPU(s) in Critical state - click for details
+            </span>
+            <ChevronDown
+              className={`w-4 h-4 transition-transform duration-200 ${alertExpanded ? "rotate-180" : ""}`}
+            />
+          </div>
+
+          {alertExpanded && (
+            <div className="mt-3 space-y-2 border-t border-red-500/30 pt-3">
+              {criticalGPUDetails.map((detail, i) => (
+                <div
+                  key={i}
+                  className="flex items-center justify-between text-xs bg-red-500/5 rounded p-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-gray-300 font-mono">
+                      {detail.nodeId}
+                    </span>
+                    <span className="text-gray-500">→</span>
+                    <span className="text-gray-300">GPU {detail.gpuId}</span>
+                  </div>
+                  <span className="text-red-300">{detail.issue}</span>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      selectNode(detail.nodeId);
+                    }}
+                    className="text-nvidia-green hover:underline ml-2"
+                  >
+                    View Node
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+type DashboardView = "overview" | "metrics" | "topology" | "network";
+
+export const Dashboard: React.FC = () => {
+  const effectiveCluster = useEffectiveCluster();
+  const selectedNode = useSimulationStore((state) => state.selectedNode);
+  const isRunning = useSimulationStore((state) => state.isRunning);
+  const requestedVisualizationView = useSimulationStore(
+    (state) => state.requestedVisualizationView,
+  );
+  const setRequestedVisualizationView = useSimulationStore(
+    (state) => state.setRequestedVisualizationView,
+  );
+  const storeActiveScenario = useSimulationStore(
+    (state) => state.activeScenario,
+  );
+  const [activeView, setActiveView] = useState<DashboardView>("overview");
+  const [selectedGPU, setSelectedGPU] = useState<string>("GPU0");
+  const [activeScenario, setActiveScenario] =
+    useState<VisualizationContext | null>(null);
+
+  // Listen for visualization view requests from LabWorkspace
+  useEffect(() => {
+    if (requestedVisualizationView) {
+      setActiveView(requestedVisualizationView);
+      // Also set the active scenario context if there's an active lab
+      if (storeActiveScenario) {
+        const context = getVisualizationContext(storeActiveScenario.id);
+        if (context) {
+          setActiveScenario(context);
+        }
+      }
+      // Clear the request
+      setRequestedVisualizationView(null);
+    }
+  }, [
+    requestedVisualizationView,
+    storeActiveScenario,
+    setRequestedVisualizationView,
+  ]);
+
+  const currentNode =
+    effectiveCluster.nodes.find((n) => n?.id === selectedNode) ||
+    effectiveCluster.nodes[0];
+
+  // Start automatic metrics collection only when simulation is running
+  useEffect(() => {
+    if (isRunning) {
+      // Get node from store directly to avoid stale closure. Route through
+      // resolveEffectiveCluster so history samples whichever cluster the
+      // tick loop is actually ticking (a scenario's isolated cluster when
+      // one is active, otherwise global) — sampling the raw global cluster
+      // unconditionally would flatline the chart during any active
+      // scenario, since Task 6 stopped ticking global while a scenario runs.
+      MetricsHistory.startCollection(() => {
+        const state = useSimulationStore.getState();
+        const nodeId = state.selectedNode;
+        const cluster = resolveEffectiveCluster(state.cluster);
+        return cluster.nodes.find((n) => n.id === nodeId) || cluster.nodes[0];
+      }, 1000);
+    } else {
+      MetricsHistory.stopCollection();
+    }
+
+    return () => {
+      MetricsHistory.stopCollection();
+    };
+  }, [isRunning]); // Only depend on isRunning, not currentNode
+
+  if (!currentNode) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-gray-400">No nodes available</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <ClusterHealthSummary />
+
+      <div>
+        <h3 className="text-lg font-semibold text-gray-200 mb-3">
+          Node Selection
+        </h3>
+        <NodeSelector />
+      </div>
+
+      {/* View Tabs — scrollable when narrow */}
+      <div className="flex gap-2 border-b border-gray-700 overflow-x-auto">
+        {[
+          { id: "overview", label: "Overview", icon: ActivityIcon },
+          { id: "metrics", label: "Historical Metrics", icon: TrendingUp },
+          { id: "topology", label: "NVLink Topology", icon: Network },
+          { id: "network", label: "InfiniBand Fabric", icon: Network },
+        ].map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => setActiveView(id as DashboardView)}
+            className={`flex items-center gap-2 px-3 py-2 font-medium text-sm transition-colors border-b-2 whitespace-nowrap shrink-0 ${
+              activeView === id
+                ? "border-nvidia-green text-nvidia-green"
+                : "border-transparent text-gray-400 hover:text-gray-200"
+            }`}
+          >
+            <Icon className="w-4 h-4 shrink-0" />
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Overview Tab */}
+      {activeView === "overview" && (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-200">
+              {currentNode.id} - GPU Status
+            </h3>
+            <div className="flex items-center gap-4 text-sm text-gray-400">
+              <span>System: {currentNode.systemType}</span>
+              <span>Driver: {currentNode.nvidiaDriverVersion}</span>
+              <span>CUDA: {currentNode.cudaVersion}</span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+            {currentNode.gpus.map((gpu) => (
+              <GPUCard key={gpu.id} gpu={gpu} nodeId={currentNode.id} />
+            ))}
+          </div>
+
+          {/* Enhanced Node Details */}
+          <div className="bg-gray-800 rounded-lg p-6 border border-gray-700 mt-6">
+            <h3 className="text-lg font-semibold text-gray-200 mb-4">
+              Node Details
+            </h3>
+
+            {/* Primary Info Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+              <div>
+                <div className="text-gray-400">Hostname</div>
+                <div className="text-nvidia-green font-mono text-xs">
+                  {currentNode.hostname}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-400">System Type</div>
+                <div className="text-gray-200">{currentNode.systemType}</div>
+              </div>
+              <div>
+                <div className="text-gray-400">CPU</div>
+                <div className="text-gray-200 text-xs">
+                  2× {currentNode.cpuModel.split(" ").slice(0, 3).join(" ")}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-400">Cores</div>
+                <div className="text-gray-200">
+                  {currentNode.cpuCount} ({currentNode.cpuCount / 2}×2)
+                </div>
+              </div>
+            </div>
+
+            {/* Secondary Info Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-4 pt-4 border-t border-gray-700">
+              <div>
+                <div className="text-gray-400">RAM Usage</div>
+                <div className="text-gray-200">
+                  {currentNode.ramUsed} / {currentNode.ramTotal} GB
+                </div>
+                <div className="mt-1 h-1.5 bg-gray-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-blue-500 rounded-full"
+                    style={{
+                      width: `${(currentNode.ramUsed / currentNode.ramTotal) * 100}%`,
+                    }}
+                  />
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-400">Driver Version</div>
+                <div className="text-gray-200">
+                  {currentNode.nvidiaDriverVersion}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-400">CUDA Version</div>
+                <div className="text-gray-200">{currentNode.cudaVersion}</div>
+              </div>
+              <div>
+                <div className="text-gray-400">OS Version</div>
+                <div className="text-gray-200 text-xs">
+                  {currentNode.osVersion}
+                </div>
+              </div>
+            </div>
+
+            {/* Status Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-4 pt-4 border-t border-gray-700">
+              <div>
+                <div className="text-gray-400">Slurm State</div>
+                <div
+                  role="status"
+                  aria-label={`Slurm state: ${currentNode.slurmState}${currentNode.slurmReason ? `, reason: ${currentNode.slurmReason}` : ""}`}
+                  className={`font-medium ${
+                    currentNode.slurmState === "idle"
+                      ? "text-green-500"
+                      : currentNode.slurmState === "alloc"
+                        ? "text-blue-500"
+                        : currentNode.slurmState === "drain"
+                          ? "text-yellow-500"
+                          : "text-red-500"
+                  }`}
+                >
+                  <span aria-hidden="true">
+                    {currentNode.slurmState === "idle"
+                      ? "✓ "
+                      : currentNode.slurmState === "alloc"
+                        ? "● "
+                        : currentNode.slurmState === "drain"
+                          ? "⚠ "
+                          : "✕ "}
+                  </span>
+                  {currentNode.slurmState}
+                  {currentNode.slurmReason && (
+                    <span className="text-gray-500 text-xs ml-1">
+                      ({currentNode.slurmReason})
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-400">InfiniBand HCAs</div>
+                <div
+                  role="status"
+                  aria-label={`InfiniBand HCAs: ${currentNode.hcas?.length || 0} active`}
+                  className="text-green-500"
+                >
+                  <span aria-hidden="true">✓ </span>
+                  {currentNode.hcas?.length || 0} Active
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-400">NVLink Health</div>
+                <div
+                  role="status"
+                  aria-label={`NVLink health: ${currentNode.gpus.filter((g) => g.nvlinks.every((l) => l.status === "Active")).length} of ${currentNode.gpus.length} GPUs OK`}
+                  className="text-green-500"
+                >
+                  <span aria-hidden="true">✓ </span>
+                  {
+                    currentNode.gpus.filter((g) =>
+                      g.nvlinks.every((l) => l.status === "Active"),
+                    ).length
+                  }
+                  /{currentNode.gpus.length} GPUs OK
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-400">Kernel Version</div>
+                <div className="text-gray-200 text-xs">
+                  {currentNode.kernelVersion}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Historical Metrics Tab */}
+      {activeView === "metrics" && (
+        <div className="space-y-6">
+          <div className="flex items-center gap-4 mb-4">
+            <label className="text-sm text-gray-400 shrink-0">
+              Select GPU:
+            </label>
+            <select
+              value={selectedGPU}
+              onChange={(e) => setSelectedGPU(e.target.value)}
+              className="bg-gray-700 text-gray-200 px-4 py-2 rounded-lg border border-gray-600 min-w-0 truncate"
+            >
+              {currentNode.gpus.map((gpu) => (
+                <option key={gpu.id} value={gpu.id}>
+                  GPU {String(gpu.id).replace("GPU", "")} - {gpu.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <React.Suspense
+            fallback={
+              <div className="h-64 flex items-center justify-center text-gray-500">
+                Loading chart...
+              </div>
+            }
+          >
+            <MetricsChart nodeId={currentNode.id} gpuId={selectedGPU} />
+          </React.Suspense>
+        </div>
+      )}
+
+      {/* NVLink Topology Tab */}
+      {activeView === "topology" && (
+        <TopologyGraph
+          node={currentNode}
+          highlightedGpus={activeScenario?.highlightedGpus}
+          highlightedLinks={activeScenario?.highlightedLinks}
+        />
+      )}
+
+      {/* InfiniBand Fabric Tab */}
+      {activeView === "network" && (
+        <div className="space-y-4">
+          {/* Fabric Health Summary - spans full width */}
+          <FabricHealthSummary cluster={effectiveCluster} />
+
+          <InfiniBandMap
+            cluster={effectiveCluster}
+            highlightedNodes={activeScenario?.highlightedNodes}
+            highlightedSwitches={activeScenario?.highlightedSwitches}
+          />
+        </div>
+      )}
+    </div>
+  );
+};

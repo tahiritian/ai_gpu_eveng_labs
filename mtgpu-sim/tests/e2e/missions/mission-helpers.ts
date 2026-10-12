@@ -1,0 +1,338 @@
+/**
+ * MissionRunner — E2E helper that drives a full narrative
+ * mission to completion via Playwright.
+ *
+ * Encapsulates every UI interaction a user performs when
+ * running a scenario: welcome screen, navigation, terminal
+ * typing, quiz answering, concept/observe Continue clicks,
+ * and mission-completion assertion.
+ */
+
+import { type Page, expect } from "@playwright/test";
+import type { Mission, MissionStep } from "./mission-data";
+import { seedUiFlags } from "../setup/seedUiFlags";
+
+/** How long to wait for lazy UI elements before failing. */
+const UI_TIMEOUT = 10_000;
+
+export class MissionRunner {
+  constructor(private page: Page) {}
+
+  // ──────────────────────────────────────────────
+  //  Top-level lifecycle
+  // ──────────────────────────────────────────────
+
+  /**
+   * Dismiss the welcome splash and wait for the simulator
+   * view (including the terminal) to load.
+   */
+  async enterSimulator(): Promise<void> {
+    // Seed tour-seen/sandbox-intro flags before the first navigation so the
+    // Spotlight Tour and sandbox intro overlays never auto-start and steal
+    // focus/clicks from the mission flow. Keep the welcome screen, since this
+    // runner explicitly exercises dismissing it below.
+    await seedUiFlags(this.page, { keepWelcome: true });
+    await this.page.goto("/");
+
+    // Wait for welcome screen
+    await this.page.waitForSelector('[data-testid="welcome-screen"]', {
+      timeout: UI_TIMEOUT,
+    });
+
+    // Click "Enter Virtual Datacenter"
+    await this.page.click('button:has-text("Enter Virtual Datacenter")');
+
+    // Wait for terminal to be ready
+    await this.page.waitForSelector('[data-testid="terminal"]', {
+      timeout: UI_TIMEOUT,
+    });
+
+    // Give terminal/xterm a moment to initialise
+    await this.page.waitForTimeout(500);
+  }
+
+  /**
+   * Navigate to Labs & Scenarios, find the mission card by
+   * title, click it, and click "Accept Mission" on the
+   * MissionBriefing screen.
+   *
+   * NOTE: MissionBriefing (src/components/MissionBriefing.tsx) is the
+   * component actually rendered here, not NarrativeIntro — App.tsx only
+   * mounts NarrativeIntro's sibling (LabWorkspace) while activeScenario is
+   * null, and activeScenario is already set by the time the briefing shows.
+   * Its "Accept Mission" button plays a ~2-3s typing/fade-in animation
+   * before becoming opaque, but the button element itself is present and
+   * clickable (non-zero size, no visibility:hidden) throughout — Playwright's
+   * actionability checks don't consider CSS opacity, so waiting for
+   * state:"visible" resolves immediately without needing the animation to
+   * finish.
+   */
+  async launchMission(title: string): Promise<void> {
+    // Switch to Labs tab
+    await this.page.click('[data-testid="nav-labs"]');
+    await this.page.waitForSelector('[data-testid="labs-list"]', {
+      timeout: UI_TIMEOUT,
+    });
+
+    // Find and click the mission card
+    const card = this.page.locator(`text=${title}`).first();
+    await card.scrollIntoViewIfNeeded();
+    await card.click();
+
+    // MissionBriefing screen — click "Accept Mission"
+    const acceptBtn = this.page.locator(
+      '[data-testid="mission-briefing"] button:has-text("Accept Mission")',
+    );
+    await acceptBtn.waitFor({ state: "visible", timeout: UI_TIMEOUT });
+    await acceptBtn.click();
+
+    // Mission Mode is now active (App.tsx swaps to MissionModeBar +
+    // SimulatorView) — wait for the instruction panel to mount.
+    await this.page.waitForSelector(
+      '[data-testid="mission-instruction-panel"]',
+      { timeout: UI_TIMEOUT },
+    );
+  }
+
+  // ──────────────────────────────────────────────
+  //  Step handlers
+  // ──────────────────────────────────────────────
+
+  /**
+   * Click the "Continue" button shown for concept/observe steps that have
+   * no expectedCommands and no quiz (src/components/MissionInstructionPanel.tsx
+   * — the button has no testid, only the visible label "Continue", and only
+   * renders inside the mission instruction panel).
+   */
+  async completeConceptStep(): Promise<void> {
+    const btn = this.page
+      .locator('[data-testid="mission-instruction-panel"] button')
+      .filter({ hasText: "Continue" });
+    await btn.waitFor({ state: "visible", timeout: UI_TIMEOUT });
+    await btn.click();
+  }
+
+  /**
+   * Click the "Continue" button shown for observe steps.
+   * (Same UI mechanism as concept steps.)
+   */
+  async completeObserveStep(): Promise<void> {
+    await this.completeConceptStep();
+  }
+
+  /**
+   * Click the "Next →" / "Finish →" button in the mission instruction
+   * panel. Mission Mode disables step auto-advance (SimulatorView sets
+   * validationConfig.autoAdvance = false while a scenario is active), so
+   * after a command step (or a concept/observe step with expectedCommands)
+   * passes validation with no quiz attached, this explicit click is what
+   * actually advances scenarioProgress.currentStepIndex.
+   */
+  async clickNextOrFinish(): Promise<void> {
+    const btn = this.page
+      .locator('[data-testid="mission-instruction-panel"] button')
+      .filter({ hasText: /Next|Finish/ });
+    await btn.waitFor({ state: "visible", timeout: UI_TIMEOUT });
+    await btn.click();
+  }
+
+  /**
+   * Type a command into the xterm.js terminal.
+   * Clicks the terminal first so it receives focus, then
+   * types each character individually (xterm keyboard input).
+   *
+   * Shell substitutions like `$(pgrep hpl)` are expanded to
+   * simple values before typing because xterm.js input handling
+   * can drop special characters (`$`, `(`, `)`) when typed
+   * character-by-character via Playwright.  The Terminal component
+   * performs the same expansion, so the command tracker records
+   * the original unexpanded form for validation matching.
+   */
+  async executeCommand(cmd: string): Promise<void> {
+    const terminal = this.page.locator('[data-testid="terminal"]');
+    await terminal.click();
+
+    // Expand $(command) shell substitutions to avoid xterm input issues
+    const resolvedCmd = cmd.replace(
+      /\$\(([^)]+)\)/g,
+      (_match, innerCmd: string) => {
+        if (innerCmd.trim().startsWith("pgrep")) return "12345";
+        return "0";
+      },
+    );
+
+    // Type character by character to trigger xterm key handlers
+    for (const char of resolvedCmd) {
+      await this.page.keyboard.type(char, { delay: 10 });
+    }
+    await this.page.keyboard.press("Enter");
+
+    // Allow the terminal to process the command
+    await this.page.waitForTimeout(800);
+  }
+
+  /**
+   * Answer an inline quiz by clicking the option at the
+   * given index.  The quiz renders 4 `<button>` elements
+   * inside the InlineQuiz component.
+   */
+  async answerQuiz(correctIndex: number): Promise<void> {
+    // Wait for the quiz to appear — look for the "KNOWLEDGE CHECK" heading
+    await this.page.waitForSelector('text="KNOWLEDGE CHECK"', {
+      timeout: UI_TIMEOUT,
+    });
+
+    // The quiz options are buttons inside the InlineQuiz component.
+    // They are siblings rendered in order, so we pick by index.
+    // Continue is a direct sibling of the h4 rather than nested in a div,
+    // so it is not matched here and the index stays aligned to the options.
+    const quizButtons = this.page.locator(
+      'h4:has-text("KNOWLEDGE CHECK") ~ div button',
+    );
+    await quizButtons.nth(correctIndex).click();
+
+    // The explanation now stays on screen until dismissed — nothing advances
+    // on a timer, so the step only moves on once Continue is clicked.
+    const continueButton = this.page.locator('[data-testid="quiz-continue"]');
+    await continueButton.waitFor({ state: "visible", timeout: UI_TIMEOUT });
+    await continueButton.click();
+  }
+
+  /**
+   * Wait for the instruction panel to show the given step number —
+   * the deterministic signal that the app advanced to the next step.
+   * (Replaces a fixed 3.5s sleep per step that added ~22 minutes of
+   * dead time across the 40-mission suite and pushed the serial CI
+   * job past its timeout.)
+   */
+  async waitForStepNumber(
+    stepNumber: number,
+    totalSteps: number,
+  ): Promise<void> {
+    await expect(
+      this.page
+        .locator('[data-testid="mission-instruction-panel"]')
+        .getByText(`Step ${stepNumber} of ${totalSteps}`),
+    ).toBeVisible({ timeout: UI_TIMEOUT });
+  }
+
+  /**
+   * Assert that the mission-complete UI is visible.
+   * After the last step, the app either shows a
+   * "Complete Mission" / "View Mission Summary" button or the
+   * NarrativeResolution component.
+   */
+  async assertMissionComplete(): Promise<void> {
+    // The NarrativeResolution component shows "Mission Complete"
+    // heading and an "Exit Mission" button.
+    const completionLocator = this.page
+      .getByText("Mission Complete")
+      .or(this.page.locator('button:has-text("Exit Mission")'));
+
+    await expect(completionLocator.first()).toBeVisible({
+      timeout: UI_TIMEOUT,
+    });
+  }
+
+  // ──────────────────────────────────────────────
+  //  Compound helpers
+  // ──────────────────────────────────────────────
+
+  /**
+   * Run a single step, dispatching to the correct handler
+   * based on step type and quiz presence.
+   *
+   * Quiz ordering matters:
+   * - concept/observe WITH quiz: quiz renders immediately alongside
+   *   the Continue button. Answering the quiz calls completeScenarioStep(),
+   *   so we answer the quiz and skip Continue/Next.
+   * - concept/observe WITHOUT quiz, no commands: click Continue, which
+   *   calls completeScenarioStep() directly.
+   * - concept/observe WITHOUT quiz, WITH commands: type command(s) →
+   *   validation passes → the Continue button is replaced by "Next →" /
+   *   "Finish →" (MissionInstructionPanel hides Continue once
+   *   expectedCommands is non-empty) → click it.
+   * - command WITH quiz: type command → validation passes → quiz appears
+   *   → answer quiz (which calls completeScenarioStep()).
+   * - command WITHOUT quiz: type command → validation passes → click
+   *   "Next →" / "Finish →" (Mission Mode disables auto-advance, so this
+   *   click is what actually advances currentStepIndex).
+   */
+  async runStep(
+    step: MissionStep,
+    advance?: { nextStepNumber: number; totalSteps: number },
+  ): Promise<void> {
+    const hasQuiz = step.hasQuiz && step.quizCorrectIndex !== undefined;
+
+    switch (step.type) {
+      case "concept":
+      case "observe":
+        if (step.expectedCommands.length > 0) {
+          // Concept/observe steps with expectedCommands require terminal input
+          // (the app sets requiresCLIInput=true and hides the Continue button).
+          for (const cmd of step.expectedCommands) {
+            await this.executeCommand(cmd);
+          }
+          if (hasQuiz) {
+            await this.answerQuiz(step.quizCorrectIndex!);
+          } else {
+            await this.clickNextOrFinish();
+          }
+        } else if (hasQuiz) {
+          // Quiz is visible immediately for concept/observe steps.
+          // Answering it triggers completeScenarioStep(), so skip Continue.
+          await this.answerQuiz(step.quizCorrectIndex!);
+        } else {
+          // No quiz, no commands — click Continue to complete the step.
+          await this.completeConceptStep();
+        }
+        break;
+      case "command": {
+        // Execute ALL expected commands — validation requires each one.
+        for (const cmd of step.expectedCommands) {
+          await this.executeCommand(cmd);
+        }
+        if (hasQuiz) {
+          // Quiz appears once validation passes; answering it advances.
+          await this.answerQuiz(step.quizCorrectIndex!);
+        } else {
+          await this.clickNextOrFinish();
+        }
+        break;
+      }
+    }
+
+    // Wait for the app to actually advance before the next step's
+    // assertions run. On the last step the caller asserts mission
+    // completion instead, which carries its own condition wait.
+    if (advance) {
+      await this.waitForStepNumber(advance.nextStepNumber, advance.totalSteps);
+    }
+  }
+
+  /**
+   * Run every step in a mission from start to finish,
+   * then assert completion.
+   */
+  async runFullMission(mission: Mission): Promise<void> {
+    for (let i = 0; i < mission.steps.length; i++) {
+      const step = mission.steps[i];
+      const isLastStep = i === mission.steps.length - 1;
+
+      await this.runStep(
+        step,
+        isLastStep
+          ? undefined
+          : {
+              nextStepNumber: i + 2,
+              totalSteps: mission.steps.length,
+            },
+      );
+
+      // On the last step, don't wait for advance — assert completion instead
+      if (isLastStep) {
+        await this.assertMissionComplete();
+      }
+    }
+  }
+}

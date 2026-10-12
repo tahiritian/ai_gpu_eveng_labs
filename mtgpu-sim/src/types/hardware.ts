@@ -1,0 +1,220 @@
+// Hardware type definitions for Data Center Lab Simulator
+
+export type HealthStatus = "OK" | "Warning" | "Critical" | "Unknown";
+
+export type DGXSystemType =
+  | "DGX-A100"
+  | "DGX-H100"
+  | "DGX-H200"
+  | "DGX-B200"
+  | "DGX-GB200"
+  | "DGX-VR200";
+
+export type GPUType =
+  | "A100-80GB"
+  | "H100-SXM"
+  | "H200-SXM"
+  | "B200"
+  | "GB200"
+  | "R200"
+  | "Blackwell";
+
+export interface MIGProfile {
+  id: number;
+  name: string;
+  memory: number; // GB
+  computeSlices: number;
+  gpuInstances: number;
+  maxInstances: number;
+}
+
+export interface MIGInstance {
+  id: number;
+  gpuId: number;
+  profileId: number;
+  uuid: string;
+  computeInstances: ComputeInstance[];
+}
+
+export interface ComputeInstance {
+  id: number;
+  giId: number;
+  profileId: number;
+  uuid: string;
+}
+
+export interface NVLinkConnection {
+  linkId: number;
+  status: "Active" | "Down" | "Inactive";
+  speed: number; // GB/s
+  txErrors: number;
+  rxErrors: number;
+  replayErrors: number;
+}
+
+export interface ECCErrors {
+  singleBit: number;
+  doubleBit: number;
+  aggregated: {
+    singleBit: number;
+    doubleBit: number;
+  };
+}
+
+export interface XIDError {
+  code: number;
+  timestamp: Date;
+  description: string;
+  severity: "Info" | "Warning" | "Critical";
+}
+
+export interface GPU {
+  id: number;
+  uuid: string;
+  name: string;
+  type: GPUType;
+  pciAddress: string;
+  temperature: number;
+  powerDraw: number;
+  powerLimit: number;
+  memoryTotal: number; // MB
+  memoryUsed: number; // MB
+  utilization: number; // 0-100
+  clocksSM: number; // MHz
+  clocksMem: number; // MHz
+  eccEnabled: boolean;
+  /**
+   * ECC mode staged by `nvidia-smi -e` but not yet in effect. Real hardware
+   * requires a GPU reset or reboot before the requested mode becomes current,
+   * which is why nvidia-smi exposes ecc.mode.current and ecc.mode.pending
+   * separately. Undefined means nothing is staged, i.e. pending == current.
+   * Optional so clusters persisted before this field existed stay valid.
+   */
+  eccModePending?: boolean;
+  eccErrors: ECCErrors;
+  migMode: boolean;
+  migInstances: MIGInstance[];
+  nvlinks: NVLinkConnection[];
+  healthStatus: HealthStatus;
+  xidErrors: XIDError[];
+  persistenceMode: boolean;
+  computeMode:
+    | "Default"
+    | "Exclusive_Thread"
+    | "Prohibited"
+    | "Exclusive_Process";
+  allocatedJobId?: number; // Slurm job ID if GPU is allocated
+  rmaStatus?: "none" | "pending"; // set to "pending" when flagged for RMA
+  activeFaultHeatWatts?: number; // persistent cooling-deficit/heat-source term from an active thermal fault; added to load-driven power every tick until a remediation clears it
+}
+
+export interface BlueFieldMode {
+  mode: "DPU" | "RestrictedDPU" | "NIC" | "SeparatedHost";
+  internalCpuModel: number; // 0 or 1
+  description: string;
+}
+
+export interface BlueFieldDPU {
+  id: number;
+  pciAddress: string;
+  devicePath: string; // /dev/mst/mt41692_pciconf0
+  firmwareVersion: string;
+  mode: BlueFieldMode;
+  ipAddress?: string;
+  armOS: string;
+  ovsConfigured: boolean;
+  rshimAvailable: boolean;
+}
+
+export interface InfiniBandPort {
+  portNumber: number;
+  state: "Active" | "Down" | "Polling" | "Disabled";
+  physicalState: "LinkUp" | "LinkDown" | "Polling" | "Sleep";
+  rate: 100 | 200 | 400 | 800; // Gb/s (EDR, HDR, NDR, XDR)
+  lid: number;
+  guid: string;
+  linkLayer: "InfiniBand" | "Ethernet";
+  // Persistent traffic counters (PHYS-7) -- advance under active load via
+  // MetricsSimulator.updateHcaMetrics, read directly by perfquery so two
+  // calls in a row on a busy port show a real, nonzero delta.
+  xmitDataBytes: number;
+  rcvDataBytes: number;
+  xmitPkts: number;
+  rcvPkts: number;
+  errors: {
+    symbolErrors: number;
+    linkDowned: number;
+    portRcvErrors: number;
+    portXmitDiscards: number;
+    portXmitWait: number;
+  };
+}
+
+export interface InfiniBandHCA {
+  id: number;
+  devicePath: string;
+  pciAddress?: string; // Optional for backward compatibility/simplicity
+  caType: string; // RDMA device name, e.g. "mlx5_0" -- unique per HCA on a node
+  model: string; // Vendor model, e.g. "ConnectX-7" -- was previously encoded (lossily, identically for every HCA) inside caType
+  firmwareVersion: string;
+  ports: InfiniBandPort[];
+}
+
+export interface BMCSensor {
+  name: string;
+  reading: number;
+  unit: string;
+  status: HealthStatus;
+  lowerCritical?: number;
+  upperCritical?: number;
+  lowerWarning?: number;
+  upperWarning?: number;
+}
+
+export interface BMC {
+  ipAddress: string;
+  macAddress: string;
+  firmwareVersion: string;
+  manufacturer: string;
+  sensors: BMCSensor[];
+  powerState: "On" | "Off";
+}
+
+export interface DGXNode {
+  id: string;
+  hostname: string;
+  systemType: DGXSystemType;
+  gpus: GPU[];
+  dpus: BlueFieldDPU[];
+  hcas: InfiniBandHCA[];
+  bmc: BMC;
+  cpuModel: string;
+  cpuCount: number;
+  ramTotal: number; // GB
+  ramUsed: number; // GB
+  osVersion: string;
+  kernelVersion: string;
+  nvidiaDriverVersion: string;
+  cudaVersion: string;
+  healthStatus: HealthStatus;
+  slurmState: "idle" | "alloc" | "drain" | "down";
+  slurmReason?: string;
+  clusterPowerLimit?: number; // Power limit set via DCMI in watts
+  bugReportCollected?: boolean; // true after nvidia-bug-report.sh runs on this node
+}
+
+export interface ClusterConfig {
+  name: string;
+  nodes: DGXNode[];
+  fabricTopology: "FatTree" | "RailOptimized" | "DragonFly";
+  bcmHA: {
+    enabled: boolean;
+    primary: string;
+    secondary: string;
+    state: "Active" | "Standby" | "Fault";
+  };
+  slurmConfig: {
+    controlMachine: string;
+    partitions: string[];
+  };
+}

@@ -1,0 +1,82 @@
+{
+  "name": "dc-lab-sim",
+  "version": "1.7.0",
+  "description": "Browser-based datacenter lab simulator for NCP-AII certification exam prep",
+  "author": "Sean Boerhout",
+  "license": "MIT",
+  "homepage": "https://www.dclabsim.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Seanbo5386/dc-lab-sim.git"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest --coverage",
+    "test:run": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:missions": "playwright test tests/e2e/missions/",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:report": "playwright show-report",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md}": [
+      "prettier --write"
+    ]
+  },
+  "dependencies": {
+    "@aws-amplify/ui-react": "^6.15.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/addon-web-links": "^0.12.0",
+    "@xterm/xterm": "^6.0.0",
+    "aws-amplify": "^6.16.2",
+    "clsx": "^2.1.1",
+    "d3": "^7.8.5",
+    "immer": "^11.1.4",
+    "lucide-react": "^0.294.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "recharts": "^2.15.4",
+    "tailwind-merge": "^3.4.0",
+    "zustand": "^4.4.7"
+  },
+  "devDependencies": {
+    "@aws-amplify/backend": "^1.21.0",
+    "@aws-amplify/backend-cli": "^1.8.2",
+    "@playwright/test": "^1.58.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^14.3.1",
+    "@types/d3": "^7.4.3",
+    "@types/react": "^18.2.43",
+    "@types/react-dom": "^18.2.17",
+    "@typescript-eslint/eslint-plugin": "^6.14.0",
+    "@typescript-eslint/parser": "^6.14.0",
+    "@vitejs/plugin-react": "^4.2.1",
+    "@vitest/coverage-v8": "^1.6.1",
+    "@vitest/ui": "^1.6.1",
+    "autoprefixer": "^10.4.16",
+    "eslint": "^8.55.0",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "eslint-plugin-react-refresh": "^0.4.5",
+    "husky": "^9.1.7",
+    "jsdom": "^23.2.0",
+    "lint-staged": "^16.2.7",
+    "postcss": "^8.4.32",
+    "prettier": "^3.8.1",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.2.2",
+    "vite": "^5.0.8",
+    "vitest": "^1.6.1"
+  }
+}

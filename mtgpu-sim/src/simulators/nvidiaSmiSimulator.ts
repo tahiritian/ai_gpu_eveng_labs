@@ -1,0 +1,1774 @@
+import { DEFAULT_DRIVER_VERSION, DEFAULT_CUDA_VERSION } from "@/data/softwareVersions";
+import type { CommandResult, CommandContext } from "@/types/commands";
+import type { ParsedCommand } from "@/utils/commandParser";
+import type { GPU, MIGInstance, DGXNode } from "@/types/hardware";
+import {
+  BaseSimulator,
+  type SimulatorMetadata,
+} from "@/simulators/BaseSimulator";
+import { MIG_PROFILES } from "@/utils/clusterFactory";
+import { generateTimestamp } from "@/utils/outputTemplates";
+import { getHardwareSpecs } from "@/data/hardwareSpecs";
+import { DISPLAY_FORMATTERS } from "@/simulators/nvidiaSmiFormatters";
+import {
+  getThermalThresholds,
+  getPowerLimitBounds,
+  deriveThrottleReasons,
+} from "@/simulation/clusterPhysicsEngine";
+import { applyRemediation } from "@/utils/remediationEngine";
+
+function getArchitecture(systemType?: string): string {
+  if (!systemType) return "Ampere";
+  const specs = getHardwareSpecs(systemType);
+  return specs.system.generation;
+}
+
+type QueryFieldHandler = (
+  gpu: GPU,
+  node: {
+    gpus: GPU[];
+    nvidiaDriverVersion?: string;
+    cudaVersion?: string;
+  } | null,
+  driverVersion: string,
+) => string;
+
+/**
+ * Single source of truth for every --query-gpu field this simulator
+ * supports. Replaces a previously separate allowlist (isValidQueryField)
+ * and switch (getGpuFieldValue) that had drifted apart — several fields
+ * allowlisted here had no implementation (SIM-11: pcie.link.* used the
+ * wrong prefix internally, nvlink.link4/5.state had no case at all), and
+ * several implemented fields were never allowlisted (power.min_limit,
+ * ecc.mode.pending), making them permanently unreachable. A field now
+ * exists in exactly one place.
+ */
+const QUERY_FIELD_HANDLERS: Record<string, QueryFieldHandler> = {
+  // Driver & System Info
+  driver_version: (_gpu, _node, driverVersion) => driverVersion,
+  cuda_version: (_gpu, node) => node?.cudaVersion || DEFAULT_CUDA_VERSION,
+  vbios_version: () => "96.00.89.00.01",
+  serial: (gpu) => gpu.uuid.split("-")[1] || "N/A",
+
+  // GPU Identification
+  gpu_name: (gpu) => gpu.name,
+  name: (gpu) => gpu.name,
+  gpu_uuid: (gpu) => gpu.uuid,
+  uuid: (gpu) => gpu.uuid,
+  index: (gpu) => gpu.id.toString(),
+  gpu_bus_id: (gpu) => gpu.pciAddress,
+  "pci.bus_id": (gpu) => gpu.pciAddress,
+
+  // MIG Mode
+  "mig.mode.current": (gpu) => (gpu.migMode ? "Enabled" : "Disabled"),
+  "mig.mode.pending": (gpu) => (gpu.migMode ? "Enabled" : "Disabled"),
+
+  // Memory
+  "memory.total": (gpu) => `${gpu.memoryTotal} MiB`,
+  "memory.used": (gpu) => `${gpu.memoryUsed} MiB`,
+  "memory.free": (gpu) => `${gpu.memoryTotal - gpu.memoryUsed} MiB`,
+  "memory.reserved": (gpu) => `${Math.round(gpu.memoryTotal * 0.02)} MiB`,
+
+  // Utilization
+  "utilization.gpu": (gpu) => `${Math.round(gpu.utilization)} %`,
+  "utilization.memory": (gpu) =>
+    `${Math.round((gpu.memoryUsed / gpu.memoryTotal) * 100)} %`,
+  "utilization.encoder": () => `${Math.floor(Math.random() * 10)} %`,
+  "utilization.decoder": () => `${Math.floor(Math.random() * 5)} %`,
+
+  // Temperature
+  "temperature.gpu": (gpu) => `${Math.round(gpu.temperature)}`,
+  "temperature.memory": (gpu) => `${Math.round(gpu.temperature + 5)}`,
+  "temperature.gpu_tlimit": () => "83",
+  "temperature.memory_max": () => "95",
+
+  // Power
+  "power.draw": (gpu) => `${Math.round(gpu.powerDraw)} W`,
+  "power.draw.average": (gpu) => `${Math.round(gpu.powerDraw * 0.95)} W`,
+  "power.draw.instant": (gpu) =>
+    `${Math.round(gpu.powerDraw + (Math.random() - 0.5) * 10)} W`,
+  "power.limit": (gpu) => `${Math.round(gpu.powerLimit)} W`,
+  "power.default_limit": (gpu) => `${Math.round(gpu.powerLimit)} W`,
+  "power.min_limit": (gpu) =>
+    `${Math.round(getPowerLimitBounds(gpu.name).min)} W`,
+  "power.max_limit": (gpu) =>
+    `${Math.round(getPowerLimitBounds(gpu.name).max)} W`,
+  "power.management": () => "Supported",
+  "enforced.power.limit": (gpu) => `${Math.round(gpu.powerLimit)} W`,
+
+  // PCIe
+  "pci.domain": () => "0x0000",
+  "pci.bus": (gpu) => gpu.pciAddress.split(":")[0] || "00",
+  "pci.device": (gpu) => gpu.pciAddress.split(":")[1]?.split(".")[0] || "00",
+  "pci.device_id": () => "0x233010DE",
+  "pci.sub_device_id": () => "0x16C110DE",
+  "pcie.link.gen.current": () => "4",
+  "pcie.link.gen.max": () => "4",
+  "pcie.link.gen.gpucurrent": () => "4",
+  "pcie.link.gen.gpumax": () => "4",
+  "pcie.link.width.current": () => "16",
+  "pcie.link.width.max": () => "16",
+
+  // Clocks
+  "clocks.current.graphics": (gpu) => `${gpu.clocksSM} MHz`,
+  "clocks.current.sm": (gpu) => `${gpu.clocksSM} MHz`,
+  "clocks.sm": (gpu) => `${gpu.clocksSM} MHz`,
+  "clocks.current.memory": (gpu) => `${gpu.clocksMem} MHz`,
+  "clocks.mem": (gpu) => `${gpu.clocksMem} MHz`,
+  "clocks.current.video": (gpu) => `${Math.round(gpu.clocksSM * 0.9)} MHz`,
+  "clocks.max.graphics": (gpu) => `${Math.round(gpu.clocksSM * 1.2)} MHz`,
+  "clocks.max.sm": (gpu) => `${Math.round(gpu.clocksSM * 1.2)} MHz`,
+  "clocks.max.memory": (gpu) => `${Math.round(gpu.clocksMem * 1.1)} MHz`,
+  "clocks.applications.graphics": (gpu) => `${gpu.clocksSM} MHz`,
+  "clocks.applications.memory": (gpu) => `${gpu.clocksMem} MHz`,
+
+  // ECC
+  "ecc.mode.current": (gpu) => (gpu.eccEnabled ? "Enabled" : "Disabled"),
+  // Falls back to the current mode when nothing is staged, which also keeps
+  // clusters persisted before eccModePending existed reporting sensibly.
+  "ecc.mode.pending": (gpu) =>
+    (gpu.eccModePending ?? gpu.eccEnabled) ? "Enabled" : "Disabled",
+  "ecc.errors.corrected.volatile.device_memory": (gpu) =>
+    gpu.eccErrors.singleBit.toString(),
+  "ecc.errors.corrected.volatile.dram": (gpu) =>
+    gpu.eccErrors.singleBit.toString(),
+  "ecc.errors.corrected.volatile.sram": () => "0",
+  "ecc.errors.corrected.volatile.total": (gpu) =>
+    gpu.eccErrors.singleBit.toString(),
+  "ecc.errors.corrected.aggregate.device_memory": (gpu) =>
+    gpu.eccErrors.aggregated.singleBit.toString(),
+  "ecc.errors.corrected.aggregate.dram": (gpu) =>
+    gpu.eccErrors.aggregated.singleBit.toString(),
+  "ecc.errors.corrected.aggregate.sram": () => "0",
+  "ecc.errors.corrected.aggregate.total": (gpu) =>
+    gpu.eccErrors.aggregated.singleBit.toString(),
+  "ecc.errors.uncorrected.volatile.device_memory": (gpu) =>
+    gpu.eccErrors.doubleBit.toString(),
+  "ecc.errors.uncorrected.volatile.dram": (gpu) =>
+    gpu.eccErrors.doubleBit.toString(),
+  "ecc.errors.uncorrected.volatile.sram": () => "0",
+  "ecc.errors.uncorrected.volatile.total": (gpu) =>
+    gpu.eccErrors.doubleBit.toString(),
+  "ecc.errors.uncorrected.aggregate.device_memory": (gpu) =>
+    gpu.eccErrors.aggregated.doubleBit.toString(),
+  "ecc.errors.uncorrected.aggregate.dram": (gpu) =>
+    gpu.eccErrors.aggregated.doubleBit.toString(),
+  "ecc.errors.uncorrected.aggregate.sram": () => "0",
+  "ecc.errors.uncorrected.aggregate.total": (gpu) =>
+    gpu.eccErrors.aggregated.doubleBit.toString(),
+
+  // Retired Pages
+  "retired_pages.single_bit_ecc.count": (gpu) =>
+    Math.floor(gpu.eccErrors.aggregated.singleBit / 10).toString(),
+  "retired_pages.sbe": (gpu) =>
+    Math.floor(gpu.eccErrors.aggregated.singleBit / 10).toString(),
+  "retired_pages.double_bit.count": (gpu) =>
+    gpu.eccErrors.aggregated.doubleBit.toString(),
+  "retired_pages.dbe": (gpu) => gpu.eccErrors.aggregated.doubleBit.toString(),
+  "retired_pages.pending": (gpu) =>
+    gpu.eccErrors.doubleBit > 0 ? "Yes" : "No",
+
+  // Compute & Display Mode
+  compute_mode: (gpu) => gpu.computeMode,
+  display_mode: () => "Disabled",
+  display_active: () => "Disabled",
+  persistence_mode: (gpu) => (gpu.persistenceMode ? "Enabled" : "Disabled"),
+
+  // Performance State
+  pstate: (gpu) =>
+    gpu.utilization > 50 ? "P0" : gpu.utilization > 10 ? "P2" : "P8",
+  performance_state: (gpu) =>
+    gpu.utilization > 50 ? "P0" : gpu.utilization > 10 ? "P2" : "P8",
+
+  // Fan
+  "fan.speed": (gpu) =>
+    `${Math.min(100, Math.round(30 + gpu.temperature * 0.7))} %`,
+
+  // Count/timestamp
+  count: (_gpu, node) => (node?.gpus.length ?? 8).toString(),
+  timestamp: () => new Date().toISOString(),
+
+  // NVLink
+  "nvlink.link0.state": (gpu) =>
+    gpu.nvlinks.length > 0 ? "Active" : "Inactive",
+  "nvlink.link1.state": (gpu) =>
+    gpu.nvlinks.length > 0 ? "Active" : "Inactive",
+  "nvlink.link2.state": (gpu) =>
+    gpu.nvlinks.length > 0 ? "Active" : "Inactive",
+  "nvlink.link3.state": (gpu) =>
+    gpu.nvlinks.length > 0 ? "Active" : "Inactive",
+  "nvlink.link4.state": (gpu) =>
+    gpu.nvlinks.length > 0 ? "Active" : "Inactive",
+  "nvlink.link5.state": (gpu) =>
+    gpu.nvlinks.length > 0 ? "Active" : "Inactive",
+
+  // Accounting mode
+  "accounting.mode": () => "Disabled",
+  "accounting.buffer_size": () => "4000",
+};
+
+export class NvidiaSmiSimulator extends BaseSimulator {
+  constructor() {
+    super();
+    this.registerCommands();
+    this.registerValidFlagsAndSubcommands();
+    // Initialize definition registry for enhanced validation (async, but fire-and-forget)
+    this.initializeDefinitionRegistry();
+  }
+
+  /**
+   * Register valid flags and subcommands for fuzzy matching
+   */
+  private registerValidFlagsAndSubcommands(): void {
+    // Register valid root-level flags
+    this.registerValidFlags([
+      { short: "h", long: "help" },
+      { short: "v", long: "version" },
+      { short: "L", long: "list-gpus" },
+      { short: "B", long: "list-excluded-gpus" },
+      { short: "q", long: "query" },
+      { short: "i", long: "id" },
+      { short: "f", long: "filename" },
+      { short: "x", long: "xml-format" },
+      { short: "d", long: "display" },
+      { short: "l", long: "loop" },
+      { long: "dtd" },
+      { long: "mig" },
+      { long: "pl" },
+      { long: "pm" },
+      { long: "query-gpu" },
+      { long: "query-compute-apps" },
+      { long: "format" },
+      { short: "e", long: "ecc-config" },
+      { short: "p", long: "reset-ecc-errors" },
+      { short: "c", long: "compute-mode" },
+      { long: "lgc", aliases: ["lock-gpu-clocks"] },
+      { long: "rgc", aliases: ["reset-gpu-clocks"] },
+      { short: "r", long: "gpu-reset" },
+    ]);
+
+    // Register valid subcommands
+    this.registerValidSubcommands([
+      "nvlink",
+      "topo",
+      "mig",
+      "drain",
+      "boost-slider",
+      "clocks",
+      "pci",
+      "dmon",
+      "pmon",
+    ]);
+  }
+
+  /**
+   * Register all nvidia-smi subcommands with metadata
+   */
+  private registerCommands(): void {
+    this.registerCommand("nvlink", this.handleNvlink.bind(this), {
+      name: "nvlink",
+      description: "Display NVLink status",
+      usage: "nvidia-smi nvlink [OPTIONS]",
+      flags: [
+        { long: "status", short: "s", description: "Display NVLink status" },
+        {
+          long: "error-counters",
+          short: "e",
+          description: "Display NVLink error counters",
+        },
+      ],
+      examples: [
+        "nvidia-smi nvlink --status",
+        "nvidia-smi nvlink -s",
+        "nvidia-smi nvlink -e",
+      ],
+    });
+
+    this.registerCommand("topo", this.handleTopo.bind(this), {
+      name: "topo",
+      description: "Display GPU topology",
+      usage: "nvidia-smi topo [OPTIONS]",
+      flags: [
+        { long: "matrix", short: "m", description: "Display topology matrix" },
+      ],
+      examples: ["nvidia-smi topo -m"],
+    });
+
+    this.registerCommand("dmon", this.handleDmon.bind(this), {
+      name: "dmon",
+      description: "Display device monitoring stats",
+      usage: "nvidia-smi dmon [OPTIONS]",
+      flags: [
+        { long: "select", short: "s", description: "Select stats to display" },
+        { long: "delay", short: "d", description: "Display delay in seconds" },
+        { long: "count", short: "c", description: "Collect count" },
+        { long: "id", short: "i", description: "Target GPU" },
+      ],
+      examples: ["nvidia-smi dmon", "nvidia-smi dmon -s pucm"],
+    });
+
+    this.registerCommand("pmon", this.handlePmon.bind(this), {
+      name: "pmon",
+      description: "Display process monitoring stats",
+      usage: "nvidia-smi pmon [OPTIONS]",
+      flags: [
+        {
+          long: "select",
+          short: "s",
+          description: "Select stats to display (u=util, m=mem)",
+        },
+        { long: "delay", short: "d", description: "Display delay in seconds" },
+        { long: "count", short: "c", description: "Collect count" },
+        { long: "id", short: "i", description: "Target GPU" },
+      ],
+      examples: ["nvidia-smi pmon", "nvidia-smi pmon -s m"],
+    });
+
+    this.registerCommand("mig", this.handleMig.bind(this), {
+      name: "mig",
+      description: "Manage MIG (Multi-Instance GPU) configuration",
+      usage: "nvidia-smi mig [OPTIONS]",
+      flags: [
+        { short: "i", long: "id", description: "GPU ID", takesValue: true },
+        { long: "lgip", description: "List GPU instance profiles" },
+        { long: "lgi", description: "List GPU instances" },
+        { long: "cgi", description: "Create GPU instances", takesValue: true },
+        { long: "dgi", description: "Destroy GPU instances" },
+        {
+          short: "C",
+          long: "create-compute",
+          description: "Create compute instances",
+        },
+      ],
+      examples: [
+        "nvidia-smi mig -lgip",
+        "nvidia-smi mig -lgi",
+        "nvidia-smi mig -i 0 -cgi 19,19,19 -C",
+        "nvidia-smi mig -i 0 -dgi",
+      ],
+    });
+  }
+
+  getMetadata(): SimulatorMetadata {
+    return {
+      name: "nvidia-smi",
+      version: "535.129.03",
+      description: "NVIDIA System Management Interface",
+      commands: Array.from(this.commandMetadata.values()),
+    };
+  }
+
+  /**
+   * Handle --version flag
+   */
+  protected handleVersion(): CommandResult {
+    const node = this.getNode({
+      currentNode: "",
+      currentPath: "",
+      environment: {},
+      history: [],
+    });
+    const driverVersion = node?.nvidiaDriverVersion || DEFAULT_DRIVER_VERSION;
+    const cudaVersion = node?.cudaVersion || DEFAULT_CUDA_VERSION;
+
+    let output = `NVIDIA-SMI version  : ${driverVersion}\n`;
+    output += `NVML version        : ${driverVersion}\n`;
+    output += `DRIVER version      : ${driverVersion}\n`;
+    output += `CUDA Version        : ${cudaVersion}\n`;
+
+    return this.createSuccess(output);
+  }
+
+  execute(parsed: ParsedCommand, context: CommandContext): CommandResult {
+    parsed = this.parseWithSchema(parsed.raw);
+    // Handle root-level flags (--version, --help, -v, -h)
+    if (this.hasAnyFlag(parsed, ["version", "v"])) {
+      return this.handleVersion();
+    }
+
+    if (this.hasAnyFlag(parsed, ["help", "h"])) {
+      const subcommand = parsed.subcommands[0];
+      return (
+        this.getHelpFromRegistry("nvidia-smi", parsed) ||
+        this.handleHelp(subcommand)
+      );
+    }
+
+    // Validate flags using registry (with fallback to fuzzy matching)
+    if (parsed.subcommands.length === 0) {
+      const flagError = this.validateFlagsWithRegistry(parsed, "nvidia-smi");
+      if (flagError) {
+        return flagError;
+      }
+    }
+
+    // Handle subcommands
+    const subcommand = parsed.subcommands[0];
+    if (subcommand) {
+      // Check for help on subcommand
+      if (this.hasAnyFlag(parsed, ["help", "h"])) {
+        return this.handleHelp(subcommand);
+      }
+
+      const handler = this.getCommand(subcommand);
+      if (handler) {
+        return this.safeExecuteHandler(
+          handler,
+          parsed,
+          context,
+        ) as CommandResult;
+      }
+    }
+
+    const node = this.getNode(context);
+    if (!node) {
+      return this.createError("Error: Unable to determine current node");
+    }
+
+    // Handle MIG operations via flags (nvidia-smi mig is handled via subcommand)
+    if (parsed.flags.has("mig")) {
+      return this.handleMigFlag(parsed, context);
+    }
+
+    // Handle power limit
+    if (parsed.flags.has("pl")) {
+      return this.handlePowerLimit(parsed, context);
+    }
+
+    // Handle ECC error reset. `-p` is the advertised short form of
+    // --reset-ecc-errors (see registered flags); the parser does not normalize
+    // short→long, so both must be checked here.
+    if (this.hasAnyFlag(parsed, ["p", "reset-ecc-errors"])) {
+      return this.handleResetEcc(parsed, context);
+    }
+
+    // Handle ECC mode setting
+    if (this.hasAnyFlag(parsed, ["e", "ecc-config"])) {
+      return this.handleEccConfig(parsed, context);
+    }
+
+    // Handle compute-mode setting
+    if (this.hasAnyFlag(parsed, ["c", "compute-mode"])) {
+      return this.handleComputeMode(parsed, context);
+    }
+
+    // -lgc/-rgc (clock locking) and -x (XML output) are documented in
+    // --help for exam reference (they are real nvidia-smi flags) but this
+    // simulator does not model locked-clock state or XML rendering. Reject
+    // explicitly instead of silently falling through to the default GPU
+    // table, which would look like success (SIM-8).
+    if (
+      this.hasAnyFlag(parsed, [
+        "lgc",
+        "lock-gpu-clocks",
+        "rgc",
+        "reset-gpu-clocks",
+      ])
+    ) {
+      return this.createError(
+        "Error: GPU clock locking (-lgc/-rgc) is not supported in this simulator.\n" +
+          "The flag is documented accurately in --help for exam reference, but does not change simulated GPU state here.",
+      );
+    }
+
+    if (this.hasAnyFlag(parsed, ["x", "xml-format"])) {
+      return this.createError(
+        "Error: XML output (-x) is not supported in this simulator.\n" +
+          "Use -q for human-readable output or --query-gpu for CSV output.",
+      );
+    }
+
+    // Handle persistence mode
+    if (parsed.flags.has("pm")) {
+      return this.handlePersistenceMode(parsed, context);
+    }
+
+    // Handle GPU reset
+    if (this.hasAnyFlag(parsed, ["r", "gpu-reset"])) {
+      return this.handleGpuReset(parsed, context);
+    }
+
+    // Handle -L (list GPUs)
+    if (this.hasAnyFlag(parsed, ["L", "list-gpus"])) {
+      return this.handleListGPUs(context);
+    }
+
+    // Handle --query-gpu flag (CSV format queries)
+    const queryGpuValue = this.getFlagString(parsed, ["query-gpu"]);
+    if (queryGpuValue) {
+      // Filter out GPUs with XID 79
+      const visibleGPUs = node.gpus.filter(
+        (gpu) => !this.hasGPUFallenOffBus(gpu),
+      );
+      const modifiedNode = { ...node, gpus: visibleGPUs };
+      return this.handleQueryGpu(queryGpuValue, modifiedNode, parsed);
+    }
+
+    // Handle -d/--display flag for selective information display
+    const displayValue = this.getFlagString(parsed, ["d", "display"]);
+    if (displayValue) {
+      const gpuIdStr = this.getFlagString(parsed, ["i", "id"]);
+      let targetGpuId: number | undefined = undefined;
+
+      if (gpuIdStr) {
+        const validationError = this.validateGpuIndexString(gpuIdStr, node);
+        if (validationError) {
+          return validationError;
+        }
+        targetGpuId = parseInt(gpuIdStr);
+      }
+
+      const visibleGPUs = node.gpus.filter(
+        (gpu) => !this.hasGPUFallenOffBus(gpu),
+      );
+      const selectedGPUs =
+        targetGpuId !== undefined
+          ? visibleGPUs.filter((g) => g.id === targetGpuId)
+          : visibleGPUs;
+
+      return this.handleDisplayFlag(displayValue, selectedGPUs, node);
+    }
+
+    // Handle query operations
+    if (this.hasAnyFlag(parsed, ["q", "query"])) {
+      const gpuIdStr = this.getFlagString(parsed, ["i", "id"]);
+      let targetGpuId: number | undefined = undefined;
+
+      if (gpuIdStr) {
+        const validationError = this.validateGpuIndexString(gpuIdStr, node);
+        if (validationError) {
+          return validationError;
+        }
+        targetGpuId = parseInt(gpuIdStr);
+      }
+
+      // If querying specific GPU, check if it has fallen off the bus
+      if (targetGpuId !== undefined) {
+        const targetGpu = node.gpus.find((g) => g.id === targetGpuId);
+        if (targetGpu && this.hasGPUFallenOffBus(targetGpu)) {
+          return this.createError(
+            `Unable to query GPU ${targetGpuId}: GPU has fallen off the bus (XID 79).\n` +
+              `Check 'dmesg | grep -i xid' for details. GPU reset or system reboot may be required.`,
+          );
+        }
+      }
+
+      // Filter out GPUs with XID 79 for query display
+      const visibleGPUs = node.gpus.filter(
+        (gpu) => !this.hasGPUFallenOffBus(gpu),
+      );
+      return {
+        output: this.formatQuery(visibleGPUs, node, targetGpuId),
+        exitCode: 0,
+      };
+    }
+
+    // Default: show basic GPU listing
+    // Handle -i flag for filtering specific GPU in default view
+    const defaultGpuIdStr = this.getFlagString(parsed, ["i", "id"]);
+    if (defaultGpuIdStr) {
+      const validationError = this.validateGpuIndexString(
+        defaultGpuIdStr,
+        node,
+      );
+      if (validationError) {
+        return validationError;
+      }
+      const targetGpuId = parseInt(defaultGpuIdStr);
+      const targetGpu = node.gpus.find((g) => g.id === targetGpuId);
+      if (targetGpu && this.hasGPUFallenOffBus(targetGpu)) {
+        return this.createError(
+          `Unable to query GPU ${targetGpuId}: GPU has fallen off the bus (XID 79).\n` +
+            `Check 'dmesg | grep -i xid' for details. GPU reset or system reboot may be required.`,
+        );
+      }
+      // Show just the specified GPU
+      const filteredGPUs = node.gpus.filter(
+        (g) => g.id === targetGpuId && !this.hasGPUFallenOffBus(g),
+      );
+      return {
+        output: this.formatDefault(filteredGPUs, node.gpus.length),
+        exitCode: 0,
+      };
+    }
+
+    // Filter out GPUs that have fallen off the bus (XID 79)
+    const visibleGPUs = node.gpus.filter(
+      (gpu) => !this.hasGPUFallenOffBus(gpu),
+    );
+    return {
+      output: this.formatDefault(visibleGPUs, node.gpus.length),
+      exitCode: 0,
+    };
+  }
+
+  private getNode(context: CommandContext) {
+    const cluster = this.resolveCluster(context);
+    return (
+      cluster.nodes.find((n) => n.id === context.currentNode) ||
+      cluster.nodes[0]
+    );
+  }
+
+  /**
+   * Check if GPU has critical XID error that makes it unavailable (XID 79: GPU fallen off the bus)
+   */
+  private hasGPUFallenOffBus(gpu: GPU): boolean {
+    return gpu.xidErrors.some((xid) => xid.code === 79);
+  }
+
+  /**
+   * Validate GPU index from -i/--id flag
+   * Returns error result if invalid, null if valid
+   */
+  private validateGpuIndexString(
+    gpuIdStr: string,
+    node: DGXNode,
+  ): CommandResult | null {
+    const maxGpuIndex = node.gpus.length - 1;
+
+    // Check for non-numeric input
+    if (!/^\d+$/.test(gpuIdStr)) {
+      return this.createError(
+        `Invalid GPU index '${gpuIdStr}'. Expected numeric value (0-${maxGpuIndex}).`,
+      );
+    }
+
+    const gpuId = parseInt(gpuIdStr);
+
+    // Check for out-of-range index
+    if (gpuId < 0 || gpuId > maxGpuIndex) {
+      return this.createError(
+        `Unable to query GPU ${gpuId}: GPU not found. Valid GPU indices: 0-${maxGpuIndex}`,
+      );
+    }
+
+    return null; // Valid
+  }
+
+  /**
+   * Handle nvidia-smi -L (list GPUs)
+   */
+  private handleListGPUs(context: CommandContext): CommandResult {
+    const node = this.getNode(context);
+    if (!node) {
+      return this.createError("Error: Unable to determine current node");
+    }
+
+    let output = "";
+    const visibleGPUs = node.gpus.filter(
+      (gpu) => !this.hasGPUFallenOffBus(gpu),
+    );
+
+    if (visibleGPUs.length === 0) {
+      output = "No devices were found\n";
+    } else {
+      visibleGPUs.forEach((gpu) => {
+        output += `GPU ${gpu.id}: ${gpu.name} (UUID: ${gpu.uuid})\n`;
+      });
+    }
+
+    return this.createSuccess(output);
+  }
+
+  /**
+   * Handle --query-gpu flag for CSV format queries
+   * Supports common fields like: mig.mode.current, mig.mode.pending, memory.total, etc.
+   */
+  private handleQueryGpu(
+    fields: string,
+    node: { gpus: GPU[]; nvidiaDriverVersion?: string; cudaVersion?: string },
+    parsed: ParsedCommand,
+  ): CommandResult {
+    const formatValue = this.getFlagString(parsed, ["format"]);
+    if (!formatValue) {
+      return this.createError(
+        "Error: unable to complete this operation. It appears that --format is not specified.\n" +
+          "Please add --format=csv (optionally with noheader and/or nounits) to your command.",
+      );
+    }
+
+    const fieldList = fields.split(",").map((f) => f.trim());
+    const isNoHeader = formatValue.includes("noheader");
+    const isNoUnits = formatValue.includes("nounits");
+    const driverVersion = node.nvidiaDriverVersion || DEFAULT_DRIVER_VERSION;
+
+    const invalidFields: string[] = [];
+    for (const field of fieldList) {
+      if (
+        !Object.prototype.hasOwnProperty.call(
+          QUERY_FIELD_HANDLERS,
+          field.toLowerCase(),
+        )
+      ) {
+        invalidFields.push(field);
+      }
+    }
+    if (invalidFields.length > 0) {
+      return this.createError(
+        `Invalid or unsupported query field(s): ${invalidFields.join(", ")}\n` +
+          `Run 'nvidia-smi --help-query-gpu' for a list of valid fields.`,
+      );
+    }
+
+    const headers = fieldList.map((f) =>
+      f
+        .split(".")
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join(" "),
+    );
+
+    let output = "";
+    if (!isNoHeader) {
+      output += headers.join(", ") + "\n";
+    }
+
+    const stripUnits = (value: string): string =>
+      value.replace(/ (W|MiB|%|MHz)$/, "");
+
+    for (const gpu of node.gpus) {
+      const values = fieldList.map((field) => {
+        const raw = QUERY_FIELD_HANDLERS[field.toLowerCase()](
+          gpu,
+          node,
+          driverVersion,
+        );
+        return isNoUnits ? stripUnits(raw) : raw;
+      });
+      output += values.join(", ") + "\n";
+    }
+
+    return this.createSuccess(output);
+  }
+
+  /**
+   * Handle -d/--display flag for selective information display
+   * Supports: MEMORY, UTILIZATION, ECC, TEMPERATURE, POWER, CLOCK, COMPUTE, PIDS,
+   * PERFORMANCE, SUPPORTED_CLOCKS, PAGE_RETIREMENT, ACCOUNTING, ENCODER_STATS,
+   * SUPPORTED_GPU_TARGET_TEMP, VOLTAGE, FBC_STATS, ROW_REMAPPER, RESET_STATUS
+   */
+  private handleDisplayFlag(
+    displayType: string,
+    gpus: GPU[],
+    node: DGXNode,
+  ): CommandResult {
+    const displayTypes = displayType
+      .toUpperCase()
+      .split(",")
+      .map((d) => d.trim());
+    const timestamp = new Date().toISOString();
+    const driverVersion = node?.nvidiaDriverVersion || DEFAULT_DRIVER_VERSION;
+
+    let output = `==============NVSMI LOG==============\n\n`;
+    output += `Timestamp                                 : ${timestamp}\n`;
+    output += `Driver Version                            : ${driverVersion}\n`;
+    output += `CUDA Version                              : ${node?.cudaVersion || DEFAULT_CUDA_VERSION}\n\n`;
+    output += `Attached GPUs                             : ${gpus.length}\n`;
+
+    for (const gpu of gpus) {
+      output += `\nGPU ${gpu.id.toString().padStart(8, "0")}\n`;
+
+      for (const dtype of displayTypes) {
+        const formatter = DISPLAY_FORMATTERS[dtype];
+        if (formatter) {
+          output += formatter(gpu, node);
+        } else {
+          output += `    Unknown display type: ${dtype}\n`;
+        }
+      }
+    }
+
+    return this.createSuccess(output);
+  }
+
+  /**
+   * Handle MIG mode enable/disable via -mig flag
+   */
+  private handleMigFlag(
+    parsed: ParsedCommand,
+    context: CommandContext,
+  ): CommandResult {
+    const node = this.getNode(context);
+    if (!node) {
+      return this.createError("Error: Unable to determine current node");
+    }
+
+    const gpuId = this.getFlagNumber(parsed, ["i", "id"], 0);
+    const migValue = parsed.flags.get("mig");
+    const enable = migValue === "1" || migValue === true;
+
+    this.resolveMutator(context).setMIGMode(node.id, gpuId, enable);
+
+    if (enable) {
+      return this.createSuccess(
+        `Enabled MIG mode for GPU ${gpuId}. All GPU applications running on the device will be terminated.\n` +
+          `GPU ${gpuId}: Reboot required.\n` +
+          `Note: On Ampere or later GPUs, the GPU must be reset for MIG mode to take effect.`,
+      );
+    }
+
+    return this.createSuccess(`Disabled MIG mode for GPU ${gpuId}.`);
+  }
+
+  /**
+   * Handle power limit setting via -pl flag
+   */
+  private handlePowerLimit(
+    parsed: ParsedCommand,
+    context: CommandContext,
+  ): CommandResult {
+    const node = this.getNode(context);
+    if (!node) {
+      return this.createError("Error: Unable to determine current node");
+    }
+
+    const gpuId = this.getFlagNumber(parsed, ["i", "id"], 0);
+    const powerLimit = this.getFlagNumber(parsed, ["pl"], 0);
+    const indexCheck = this.validateGpuIndex(gpuId, node.gpus.length);
+    if (!indexCheck.valid) {
+      return this.createError(`Error: ${indexCheck.error}`);
+    }
+    const gpu = node.gpus[gpuId];
+    const bounds = getPowerLimitBounds(gpu.name);
+
+    if (powerLimit < bounds.min || powerLimit > bounds.max) {
+      return this.createError(
+        `Error: Power limit must be between ${bounds.min} and ${bounds.max} W`,
+      );
+    }
+
+    const result = applyRemediation(gpu, node, "set-power-limit");
+    const updates: Partial<GPU> = { powerLimit };
+    if (result.outcome === "fixed" && result.gpuUpdates) {
+      Object.assign(updates, result.gpuUpdates);
+    }
+    this.resolveMutator(context).updateGPU(node.id, gpuId, updates);
+
+    return this.createSuccess(
+      result.outcome === "fixed"
+        ? `Power limit for GPU ${gpuId} set to ${powerLimit} W\n${result.message}`
+        : `Power limit for GPU ${gpuId} set to ${powerLimit} W`,
+    );
+  }
+
+  /**
+   * Handle ECC mode setting via -e/--ecc-config. Mirrors the -p/--reset-ecc-errors
+   * pattern for reading a flag with both a short and long form (the parser
+   * does not normalize short -> long, see the comment at that call site).
+   */
+  private handleEccConfig(
+    parsed: ParsedCommand,
+    context: CommandContext,
+  ): CommandResult {
+    const node = this.getNode(context);
+    if (!node) {
+      return this.createError("Error: Unable to determine current node");
+    }
+
+    const gpuId = this.getFlagNumber(parsed, ["i", "id"], 0);
+    const indexCheck = this.validateGpuIndex(gpuId, node.gpus.length);
+    if (!indexCheck.valid) {
+      return this.createError(`Error: ${indexCheck.error}`);
+    }
+
+    const eccValue = parsed.flags.get("e") ?? parsed.flags.get("ecc-config");
+    if (eccValue !== "0" && eccValue !== "1" && eccValue !== true) {
+      return this.createError(
+        `Error: Invalid ECC config value: ${String(eccValue)}\n` +
+          `Valid values: 0 (disable), 1 (enable)`,
+      );
+    }
+    const enable = eccValue === "1" || eccValue === true;
+
+    // Stage the change only. The success message below (and nvidia-smi.json)
+    // both say a reset/reboot is required, so flipping eccEnabled here would
+    // contradict the tool's own output and collapse ecc.mode.current and
+    // ecc.mode.pending into the same value. --gpu-reset promotes it.
+    this.resolveMutator(context).updateGPU(node.id, gpuId, {
+      eccModePending: enable,
+    });
+
+    return this.createSuccess(
+      `ECC support ${enable ? "enabled" : "disabled"} for GPU ${gpuId}.\n` +
+        `All GPUs must be reset (or the machine rebooted) for this setting to take effect.`,
+    );
+  }
+
+  private static readonly COMPUTE_MODES: Record<string, GPU["computeMode"]> = {
+    "0": "Default",
+    "1": "Exclusive_Thread",
+    "2": "Prohibited",
+    "3": "Exclusive_Process",
+  };
+
+  // Real nvidia-smi abbreviates these in the compact default-table column
+  // (22 chars wide) rather than truncating the full enum value mid-word.
+  private static readonly COMPUTE_MODE_TABLE_DISPLAY: Record<
+    GPU["computeMode"],
+    string
+  > = {
+    Default: "Default",
+    Exclusive_Thread: "E. Thread",
+    Prohibited: "Prohibited",
+    Exclusive_Process: "E. Process",
+  };
+
+  /**
+   * Handle compute-mode setting via -c/--compute-mode. Same short/long
+   * flag-reading pattern as -p/--reset-ecc-errors and -e/--ecc-config.
+   */
+  private handleComputeMode(
+    parsed: ParsedCommand,
+    context: CommandContext,
+  ): CommandResult {
+    const node = this.getNode(context);
+    if (!node) {
+      return this.createError("Error: Unable to determine current node");
+    }
+
+    const gpuId = this.getFlagNumber(parsed, ["i", "id"], 0);
+    const indexCheck = this.validateGpuIndex(gpuId, node.gpus.length);
+    if (!indexCheck.valid) {
+      return this.createError(`Error: ${indexCheck.error}`);
+    }
+
+    const modeValue = String(
+      parsed.flags.get("c") ?? parsed.flags.get("compute-mode") ?? "",
+    );
+    const newMode = NvidiaSmiSimulator.COMPUTE_MODES[modeValue];
+    if (!newMode) {
+      return this.createError(
+        `Error: Invalid compute mode value: ${modeValue}\n` +
+          `Valid values: 0 (Default), 1 (Exclusive_Thread), 2 (Prohibited), 3 (Exclusive_Process)`,
+      );
+    }
+
+    this.resolveMutator(context).updateGPU(node.id, gpuId, {
+      computeMode: newMode,
+    });
+
+    return this.createSuccess(
+      `Compute mode for GPU ${gpuId} set to ${newMode}`,
+    );
+  }
+
+  /**
+   * Handle persistence mode via -pm flag
+   */
+  private handlePersistenceMode(
+    parsed: ParsedCommand,
+    context: CommandContext,
+  ): CommandResult {
+    const node = this.getNode(context);
+    if (!node) {
+      return this.createError("Error: Unable to determine current node");
+    }
+
+    const gpuId = this.getFlagNumber(parsed, ["i", "id"], 0);
+    const enable = parsed.flags.get("pm") === "1";
+
+    this.resolveMutator(context).updateGPU(node.id, gpuId, {
+      persistenceMode: enable,
+    });
+
+    return this.createSuccess(
+      `Persistence mode ${enable ? "enabled" : "disabled"} for GPU ${gpuId}`,
+    );
+  }
+
+  /**
+   * Handle GPU reset via --gpu-reset flag
+   */
+  private handleGpuReset(
+    parsed: ParsedCommand,
+    context: CommandContext,
+  ): CommandResult {
+    const node = this.getNode(context);
+    if (!node) {
+      return this.createError("Error: Unable to determine current node");
+    }
+
+    const gpuIdStr = this.getFlagString(parsed, ["i", "id"]);
+    if (gpuIdStr === undefined) {
+      return this.createError(
+        "Error: GPU reset requires -i flag to specify GPU ID\nUsage: nvidia-smi --gpu-reset -i <gpu_id>",
+      );
+    }
+
+    const validationError = this.validateGpuIndexString(gpuIdStr, node);
+    if (validationError) {
+      return validationError;
+    }
+
+    const gpuId = parseInt(gpuIdStr);
+    const gpu = node.gpus[gpuId];
+    if (!gpu) {
+      return this.createError(`Error: GPU ${gpuId} not found`);
+    }
+
+    const result = applyRemediation(gpu, node, "gpu-reset");
+
+    // A reset is what makes a staged `-e` mode take effect, so promote it on
+    // any reset that actually happens -- including the no-fault case, which is
+    // the normal path for the documented `-e 0` then `--gpu-reset` workflow.
+    const eccPromotion: Partial<GPU> =
+      gpu.eccModePending !== undefined
+        ? { eccEnabled: gpu.eccModePending, eccModePending: undefined }
+        : {};
+
+    if (result.outcome === "fixed" && result.gpuUpdates) {
+      this.resolveMutator(context).updateGPU(node.id, gpuId, {
+        ...result.gpuUpdates,
+        ...eccPromotion,
+      });
+      return this.createSuccess(
+        `GPU ${gpuId} reset successfully.\n` +
+          `All compute applications using GPU ${gpuId} have been terminated.\n` +
+          `Monitor 'dmesg' for XID recurrence. If errors persist, hardware RMA may be required.`,
+      );
+    }
+
+    // No fault to clear -> a reset still "succeeds" as a no-op.
+    if (result.outcome === "not-applicable") {
+      if (gpu.eccModePending !== undefined) {
+        this.resolveMutator(context).updateGPU(node.id, gpuId, eccPromotion);
+      }
+      return this.createSuccess(
+        `GPU ${gpuId} reset successfully.\n` +
+          `All compute applications using GPU ${gpuId} have been terminated.`,
+      );
+    }
+
+    // blocked (alloc) or insufficient (off-bus / nvlink / rma).
+    return this.createError(`Unable to reset GPU ${gpuId}: ${result.message}`);
+  }
+
+  /**
+   * Handle --reset-ecc-errors flag
+   */
+  private handleResetEcc(
+    parsed: ParsedCommand,
+    context: CommandContext,
+  ): CommandResult {
+    const node = this.getNode(context);
+    if (!node) {
+      return this.createError("Error: Unable to determine current node");
+    }
+    const gpuIdStr = this.getFlagString(parsed, ["i", "id"]);
+    if (gpuIdStr === undefined) {
+      return this.createError(
+        "Error: --reset-ecc-errors requires -i flag to specify GPU ID\nUsage: nvidia-smi -i <gpu_id> --reset-ecc-errors",
+      );
+    }
+    const validationError = this.validateGpuIndexString(gpuIdStr, node);
+    if (validationError) {
+      return validationError;
+    }
+    const gpuId = parseInt(gpuIdStr);
+    const gpu = node.gpus[gpuId];
+    if (!gpu) {
+      return this.createError(`Error: GPU ${gpuId} not found`);
+    }
+
+    const result = applyRemediation(gpu, node, "reset-ecc-errors");
+    if (result.outcome === "fixed" && result.gpuUpdates) {
+      this.resolveMutator(context).updateGPU(node.id, gpuId, result.gpuUpdates);
+      return this.createSuccess(
+        `Successfully reset ECC error counts for GPU ${gpuId}.`,
+      );
+    }
+    if (result.outcome === "not-applicable") {
+      return this.createSuccess(`No ECC errors to reset for GPU ${gpuId}.`);
+    }
+    return this.createError(
+      `Unable to reset ECC errors for GPU ${gpuId}: ${result.message}`,
+    );
+  }
+
+  /**
+   * Handle dmon subcommand — device monitoring
+   */
+  private handleDmon(
+    _parsed: ParsedCommand,
+    context: CommandContext,
+  ): CommandResult {
+    const node = this.getNode(context);
+    if (!node) {
+      return this.createError("Error: Unable to determine current node");
+    }
+
+    let header =
+      "# gpu   pwr  gtemp  mtemp    sm   mem   enc   dec  mclk  pclk\n";
+    header += "# Idx     W      C      C     %     %     %     %   MHz   MHz\n";
+
+    let output = header;
+    const visibleGPUs = node.gpus.filter((g) => !this.hasGPUFallenOffBus(g));
+    visibleGPUs.forEach((gpu, idx) => {
+      const pwr = Math.round(gpu.powerDraw);
+      const temp = Math.round(gpu.temperature);
+      const sm = Math.round(gpu.utilization);
+      const mem = Math.round((gpu.memoryUsed / gpu.memoryTotal) * 100);
+      const mclk = Math.round(gpu.clocksSM * 0.5);
+      const pclk = gpu.clocksSM;
+      output += `    ${idx}   ${String(pwr).padStart(3)}    ${String(temp).padStart(3)}      -    ${String(sm).padStart(3)}    ${String(mem).padStart(3)}     0     0  ${mclk}  ${pclk}\n`;
+    });
+
+    return this.createSuccess(output);
+  }
+
+  /**
+   * Handle pmon subcommand — process monitoring
+   */
+  private handlePmon(
+    parsed: ParsedCommand,
+    context: CommandContext,
+  ): CommandResult {
+    const node = this.getNode(context);
+    if (!node) {
+      return this.createError("Error: Unable to determine current node");
+    }
+
+    const showMem = this.getFlagString(parsed, ["s"]) === "m";
+
+    let header: string;
+    if (showMem) {
+      header = "# gpu        pid  type    fb   command\n";
+      header += "# Idx          #   C/G    MB   name\n";
+    } else {
+      header =
+        "# gpu        pid  type    sm   mem   enc   dec    fb   command\n";
+      header += "# Idx          #   C/G     %     %     %     %    MB   name\n";
+    }
+
+    let output = header;
+    const visibleGPUs = node.gpus.filter((g) => !this.hasGPUFallenOffBus(g));
+    visibleGPUs.forEach((gpu, idx) => {
+      if (gpu.allocatedJobId) {
+        const fb = Math.round(gpu.memoryUsed);
+        if (showMem) {
+          output += `    ${idx}      ${12345 + idx}     C  ${String(fb).padStart(5)}   python\n`;
+        } else {
+          const sm = Math.round(gpu.utilization);
+          const mem = Math.round((gpu.memoryUsed / gpu.memoryTotal) * 100);
+          output += `    ${idx}      ${12345 + idx}     C    ${String(sm).padStart(3)}    ${String(mem).padStart(3)}     0     0  ${String(fb).padStart(5)}   python\n`;
+        }
+      } else {
+        if (showMem) {
+          output += `    ${idx}          -     -     -   -\n`;
+        } else {
+          output += `    ${idx}          -     -      -      -     -     -      -   -\n`;
+        }
+      }
+    });
+
+    return this.createSuccess(output);
+  }
+
+  /**
+   * Handle nvlink subcommand
+   */
+  private handleNvlink(
+    parsed: ParsedCommand,
+    context: CommandContext,
+  ): CommandResult {
+    if (this.hasAnyFlag(parsed, ["help", "h"])) {
+      return this.handleHelp("nvlink");
+    }
+
+    const node = this.getNode(context);
+    if (!node) {
+      return this.createError("Error: Unable to determine current node");
+    }
+
+    if (this.hasAnyFlag(parsed, ["status", "s"])) {
+      let output = `GPU 0: ${node.gpus[0].name}\n`;
+      node.gpus[0].nvlinks.forEach((link) => {
+        output += `\tLink ${link.linkId}: ${link.status} (${link.speed} GB/s)\n`;
+      });
+      return this.createSuccess(output);
+    }
+
+    // Error counters (-e flag)
+    if (this.hasAnyFlag(parsed, ["e"])) {
+      let output = `GPU 0: ${node.gpus[0].name}\n`;
+      output += `NVLink Error Counters:\n`;
+      node.gpus[0].nvlinks.forEach((link) => {
+        output += `  Link ${link.linkId}: CRC Errors: ${link.txErrors + link.rxErrors}, Replay Errors: ${link.replayErrors}\n`;
+      });
+      return this.createSuccess(output);
+    }
+
+    return this.createError(
+      "nvidia-smi nvlink: Missing required option: --status\nTry 'nvidia-smi nvlink --help' for more information.",
+    );
+  }
+
+  /**
+   * Handle topo subcommand
+   */
+  private handleTopo(
+    parsed: ParsedCommand,
+    context: CommandContext,
+  ): CommandResult {
+    if (this.hasAnyFlag(parsed, ["help", "h"])) {
+      return this.handleHelp("topo");
+    }
+
+    const node = this.getNode(context);
+    if (!node) {
+      return this.createError("Error: Unable to determine current node");
+    }
+
+    if (this.hasAnyFlag(parsed, ["m", "matrix"])) {
+      // Use hardware specs registry for NVLink label
+      const specs = getHardwareSpecs(node.systemType || "DGX-A100");
+      const nvLinkLabel = specs.nvlink.nvLinkLabel;
+
+      let output =
+        "\tGPU0\tGPU1\tGPU2\tGPU3\tGPU4\tGPU5\tGPU6\tGPU7\tmlx5_0\tmlx5_1\tCPU Affinity\tNUMA Affinity\n";
+      node.gpus.forEach((_gpu, i) => {
+        output += `GPU${i}\t`;
+        for (let j = 0; j < 8; j++) {
+          if (i === j) output += " X\t";
+          else output += `${nvLinkLabel}\t`;
+        }
+        output += "SYS\tSYS\t0-63\t0\n";
+      });
+
+      output += `\nLegend:\n\n`;
+      output += `  X    = Self\n`;
+      output += `  SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)\n`;
+      output += `  NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node\n`;
+      output += `  PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)\n`;
+      output += `  PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)\n`;
+      output += `  PIX  = Connection traversing at most a single PCIe bridge\n`;
+      output += `  NV#  = Connection traversing a bonded set of # NVLinks\n`;
+
+      return this.createSuccess(output);
+    }
+
+    return this.createError(
+      "nvidia-smi topo: Missing required option: -m/--matrix\nTry 'nvidia-smi topo --help' for more information.",
+    );
+  }
+
+  /**
+   * Handle mig subcommand
+   */
+  private handleMig(
+    parsed: ParsedCommand,
+    context: CommandContext,
+  ): CommandResult {
+    if (this.hasAnyFlag(parsed, ["help", "h"])) {
+      return this.handleHelp("mig");
+    }
+
+    const node = this.getNode(context);
+    if (!node) {
+      return this.createError("Error: Unable to determine current node");
+    }
+
+    // Handle -lgip (list GPU instance profiles)
+    if (this.hasAnyFlag(parsed, ["lgip"])) {
+      return {
+        output: this.formatMIGList(node.gpus, "gi-profile"),
+        exitCode: 0,
+      };
+    }
+
+    // Handle -lgi (list GPU instances)
+    if (this.hasAnyFlag(parsed, ["lgi"])) {
+      return {
+        output: this.formatMIGList(node.gpus, "gi"),
+        exitCode: 0,
+      };
+    }
+
+    // Handle -cgi (create GPU instances)
+    if (this.hasAnyFlag(parsed, ["cgi"])) {
+      const gpuId = this.getFlagNumber(parsed, ["i", "id"], 0);
+      const gpu = node.gpus[gpuId];
+
+      if (!gpu.migMode) {
+        return this.createError(
+          "Error: MIG mode not enabled on this GPU\nUse 'nvidia-smi -i ${gpuId} -mig 1' to enable MIG mode.",
+        );
+      }
+
+      // Parse profile IDs from the cgi flag value
+      const cgiValue = this.getFlagString(parsed, ["cgi"], "");
+      const profileIds = cgiValue
+        .split(",")
+        .map((id) => parseInt(id.trim()))
+        .filter((id) => !isNaN(id));
+
+      if (profileIds.length === 0) {
+        return this.createError(
+          "Error: No valid profile IDs specified.\nUse nvidia-smi mig -lgip to list available profiles.",
+        );
+      }
+
+      // Create instances
+      const createCompute = this.hasAnyFlag(parsed, ["C", "create-compute"]);
+      const newInstances: MIGInstance[] = profileIds.map((profileId, idx) => ({
+        id: gpu.migInstances.length + idx,
+        gpuId: gpuId,
+        profileId: profileId,
+        uuid: `MIG-GPU-${gpuId}-${gpu.migInstances.length + idx}`,
+        computeInstances: createCompute
+          ? [
+              {
+                id: 0,
+                giId: gpu.migInstances.length + idx,
+                profileId: 0,
+                uuid: `MIG-GPU-${gpuId}/CI-${gpu.migInstances.length + idx}/0`,
+              },
+            ]
+          : [],
+      }));
+
+      this.resolveMutator(context).updateGPU(node.id, gpuId, {
+        migInstances: [...gpu.migInstances, ...newInstances],
+      });
+
+      let output = `Successfully created ${profileIds.length} GPU instance(s) on GPU ${gpuId}:\n`;
+      newInstances.forEach((gi) => {
+        const profile = MIG_PROFILES.find((p) => p.id === gi.profileId);
+        output += `  GPU instance ID ${gi.id}: ${profile?.name || "Unknown profile"}\n`;
+      });
+
+      return this.createSuccess(output);
+    }
+
+    // Handle -dgi (destroy GPU instances)
+    if (this.hasAnyFlag(parsed, ["dgi", "dci"])) {
+      const gpuId = this.getFlagNumber(parsed, ["i", "id"], 0);
+      this.resolveMutator(context).updateGPU(node.id, gpuId, {
+        migInstances: [],
+      });
+
+      return this.createSuccess(
+        `Successfully destroyed all GPU instances on GPU ${gpuId}`,
+      );
+    }
+
+    return this.createError(
+      "nvidia-smi mig: No operation specified.\nTry 'nvidia-smi mig --help' for more information.",
+    );
+  }
+
+  private formatDefault(gpus: GPU[], totalGPUs?: number): string {
+    // SOURCE OF TRUTH: Column widths
+    const COL_1 = 31; // GPU Name/Fan info
+    const COL_2 = 22; // Bus ID/Memory
+    const COL_3 = 22; // ECC/Util
+    const TOTAL_WIDTH = COL_1 + COL_2 + COL_3 + 4; // +4 for the | separators
+
+    // Generate borders dynamically from column widths
+    const TOP_BORDER = "+" + "-".repeat(TOTAL_WIDTH - 2) + "+";
+    const COL_SEPARATOR =
+      "+" +
+      "-".repeat(COL_1) +
+      "+" +
+      "-".repeat(COL_2) +
+      "+" +
+      "-".repeat(COL_3) +
+      "+";
+    const HEADER_SEP =
+      "|" +
+      "-".repeat(COL_1) +
+      "+" +
+      "-".repeat(COL_2) +
+      "+" +
+      "-".repeat(COL_3) +
+      "|";
+    const DOUBLE_SEP =
+      "|" +
+      "=".repeat(COL_1) +
+      "+" +
+      "=".repeat(COL_2) +
+      "+" +
+      "=".repeat(COL_3) +
+      "|";
+
+    // Helper to pad content to exact column width
+    const padCol = (content: string, width: number): string => {
+      if (content.length > width) return content.substring(0, width);
+      return content.padEnd(width, " ");
+    };
+
+    // Use jittered timestamp for realism
+    const dateTimeStr = generateTimestamp({
+      format: "nvidia-smi",
+      jitterMs: 100,
+    });
+
+    const node = this.getNode({
+      currentNode: "",
+      currentPath: "",
+      environment: {},
+      history: [],
+    });
+    const driverVersion = node?.nvidiaDriverVersion || DEFAULT_DRIVER_VERSION;
+    const cudaVersion = node?.cudaVersion || DEFAULT_CUDA_VERSION;
+
+    let output = `${dateTimeStr}\n`;
+
+    // Header section
+    output += TOP_BORDER + "\n";
+    const headerContent = ` NVIDIA-SMI ${driverVersion}   Driver Version: ${driverVersion}   CUDA Version: ${cudaVersion} `;
+    output += "|" + padCol(headerContent, TOTAL_WIDTH - 2) + "|\n";
+    output += HEADER_SEP + "\n";
+
+    // Column headers
+    const hdr1 = " GPU  Name        Persistence-M";
+    const hdr2 = " Bus-Id        Disp.A ";
+    const hdr3 = " Volatile Uncorr. ECC ";
+    output +=
+      "|" +
+      padCol(hdr1, COL_1) +
+      "|" +
+      padCol(hdr2, COL_2) +
+      "|" +
+      padCol(hdr3, COL_3) +
+      "|\n";
+
+    const hdr4 = " Fan  Temp  Perf  Pwr:Usage/Cap";
+    const hdr5 = "         Memory-Usage ";
+    const hdr6 = " GPU-Util  Compute M. ";
+    output +=
+      "|" +
+      padCol(hdr4, COL_1) +
+      "|" +
+      padCol(hdr5, COL_2) +
+      "|" +
+      padCol(hdr6, COL_3) +
+      "|\n";
+
+    const hdr7 = "";
+    const hdr8 = "";
+    const hdr9 = "               MIG M. ";
+    output +=
+      "|" +
+      padCol(hdr7, COL_1) +
+      "|" +
+      padCol(hdr8, COL_2) +
+      "|" +
+      padCol(hdr9, COL_3) +
+      "|\n";
+
+    output += DOUBLE_SEP + "\n";
+
+    // GPU data rows
+    gpus.forEach((gpu) => {
+      // Row 1: GPU ID, Name, Persistence, Bus ID, ECC
+      const gpuName =
+        gpu.name.length > 16 ? gpu.name.substring(0, 16) : gpu.name;
+      const persist = gpu.persistenceMode ? "On " : "Off";
+      const col1_r1 = `   ${gpu.id}  ${gpuName.padEnd(16)} ${persist}`;
+      const col2_r1 = ` ${gpu.pciAddress.padEnd(16)} Off `;
+      // Datacenter GPUs with ECC enabled show "0" not "N/A" when no errors
+      const ecc =
+        gpu.eccErrors.doubleBit > 0
+          ? gpu.eccErrors.doubleBit.toString()
+          : gpu.eccEnabled
+            ? "0"
+            : "N/A";
+      const col3_r1 = ecc.padStart(COL_3 - 1) + " ";
+      output +=
+        "|" +
+        padCol(col1_r1, COL_1) +
+        "|" +
+        padCol(col2_r1, COL_2) +
+        "|" +
+        padCol(col3_r1, COL_3) +
+        "|\n";
+
+      // Row 2: Fan, Temp, Perf, Power, Memory, Utilization
+      const isCritical = gpu.healthStatus === "Critical";
+      const temp = isCritical
+        ? "ERR!"
+        : Math.round(gpu.temperature).toString().padStart(3) + "C";
+      const pwr = Math.round(gpu.powerDraw).toString().padStart(3);
+      const pwrMax = Math.round(gpu.powerLimit).toString().padStart(3);
+      const memUsed = Math.round(gpu.memoryUsed).toString().padStart(5);
+      const memTotal = Math.round(gpu.memoryTotal).toString().padStart(5);
+      const util = isCritical
+        ? "ERR"
+        : Math.round(gpu.utilization).toString().padStart(3) + "%";
+
+      const col1_r2 = ` N/A   ${temp.padStart(4)}    P0    ${pwr}W / ${pwrMax}W `;
+      const col2_r2 = `   ${memUsed}MiB / ${memTotal}MiB `;
+      // 3-space gap (not 6) so the longest abbreviation ("Prohibited" /
+      // "E. Process", 10 chars) still fits within COL_3 (22) alongside the
+      // fixed "     " + util(4) prefix, instead of being truncated mid-word.
+      const computeModeDisplay =
+        NvidiaSmiSimulator.COMPUTE_MODE_TABLE_DISPLAY[gpu.computeMode];
+      const col3_r2 = `     ${util.padStart(4)}   ${computeModeDisplay}`;
+      output +=
+        "|" +
+        padCol(col1_r2, COL_1) +
+        "|" +
+        padCol(col2_r2, COL_2) +
+        "|" +
+        padCol(col3_r2, COL_3) +
+        "|\n";
+
+      // Row 3: Empty, Empty, MIG Mode
+      const mig = gpu.migMode ? "Enabled" : "N/A";
+      const col1_r3 = "";
+      const col2_r3 = "";
+      const col3_r3 = mig.padStart(COL_3 - 1) + " ";
+      output +=
+        "|" +
+        padCol(col1_r3, COL_1) +
+        "|" +
+        padCol(col2_r3, COL_2) +
+        "|" +
+        padCol(col3_r3, COL_3) +
+        "|\n";
+
+      output += COL_SEPARATOR + "\n";
+    });
+
+    // Processes section
+    output += "\n";
+    output += TOP_BORDER + "\n";
+    const procHeader = " Processes:";
+    output += "|" + padCol(procHeader, TOTAL_WIDTH - 2) + "|\n";
+    const procCols =
+      "  GPU   GI   CI        PID   Type   Process name                  GPU Memory ";
+    output += "|" + padCol(procCols, TOTAL_WIDTH - 2) + "|\n";
+    const procCols2 =
+      "        ID   ID                                                   Usage      ";
+    output += "|" + padCol(procCols2, TOTAL_WIDTH - 2) + "|\n";
+    output += "|" + "=".repeat(TOTAL_WIDTH - 2) + "|\n";
+    const noProc = "  No running processes found";
+    output += "|" + padCol(noProc, TOTAL_WIDTH - 2) + "|\n";
+    output += TOP_BORDER + "\n";
+
+    // Add warning if some GPUs are not visible due to XID errors
+    if (totalGPUs !== undefined && gpus.length < totalGPUs) {
+      const missingGPUs = totalGPUs - gpus.length;
+      output += `\n\x1b[31mWARNING: ${missingGPUs} GPU(s) not shown due to critical errors (XID 79: GPU fallen off the bus)\x1b[0m\n`;
+      output += `\x1b[33mCheck 'dmesg | grep -i xid' for details. GPU reset or system reboot may be required.\x1b[0m\n`;
+    }
+
+    return output;
+  }
+
+  private formatQuery(gpus: GPU[], node: DGXNode, gpu?: number): string {
+    const specs = getHardwareSpecs(node.systemType || "DGX-A100");
+    const selectedGPUs =
+      gpu !== undefined ? gpus.filter((g) => g.id === gpu) : gpus;
+
+    let output = "";
+    selectedGPUs.forEach((g, idx) => {
+      if (idx > 0) output += "\n";
+
+      output += `==============NVSMI LOG==============\n\n`;
+      output += `Timestamp                                 : ${new Date().toISOString()}\n`;
+      output += `Driver Version                            : ${node.nvidiaDriverVersion}\n`;
+      output += `CUDA Version                              : ${node.cudaVersion}\n\n`;
+      output += `Attached GPUs                             : ${gpus.length}\n`;
+      output += `GPU ${g.id.toString().padStart(8, "0")}\n\n`;
+
+      output += `Product Name                              : ${g.name}\n`;
+      output += `Product Brand                             : NVIDIA\n`;
+      output += `Product Architecture                      : ${getArchitecture(node.systemType)}\n`;
+      output += `Display Mode                              : Disabled\n`;
+      output += `Display Active                            : Disabled\n`;
+      output += `Persistence Mode                          : ${g.persistenceMode ? "Enabled" : "Disabled"}\n`;
+      output += `MIG Mode\n`;
+      output += `    Current                               : ${g.migMode ? "Enabled" : "Disabled"}\n`;
+      output += `    Pending                               : ${g.migMode ? "Enabled" : "Disabled"}\n`;
+      output += `Accounting Mode                           : Disabled\n`;
+      output += `Accounting Mode Buffer Size               : 4000\n\n`;
+
+      output += `GPU UUID                                  : ${g.uuid}\n`;
+      output += `Minor Number                              : ${g.id}\n`;
+      output += `VBIOS Version                             : 92.00.5C.00.01\n`;
+      output += `MultiGPU Board                            : No\n`;
+      output += `Board ID                                  : 0x${g.id.toString(16).padStart(4, "0")}\n`;
+      output += `GPU Part Number                           : 692-2G503-0200-002\n`;
+      output += `Module ID                                 : 0\n`;
+      output += `Inforom Version\n`;
+      output += `    Image Version                         : G503.0200.00.03\n`;
+      output += `    OEM Object                            : 2.0\n`;
+      output += `    ECC Object                            : 6.16\n`;
+      output += `    Power Management Object               : N/A\n\n`;
+
+      output += `GPU Operation Mode\n`;
+      output += `    Current GOM                           : N/A\n`;
+      output += `    Pending GOM                           : N/A\n\n`;
+
+      output += `GPU Virtualization Mode\n`;
+      output += `    Virtualization Mode                   : None\n`;
+      output += `    Host VGPU Mode                        : N/A\n\n`;
+
+      output += `PCI\n`;
+      output += `    Bus                                   : 0x${g.pciAddress.split(":")[1]}\n`;
+      output += `    Device                                : 0x${g.pciAddress.split(":")[2].split(".")[0]}\n`;
+      output += `    Domain                                : 0x0000\n`;
+      output += `    Device Id                             : 0x${specs.gpu.pciDeviceId}10DE\n`;
+      output += `    Bus Id                                : ${g.pciAddress}\n`;
+      output += `    Sub System Id                         : 0x138F10DE\n`;
+      output += `    GPU Link Info\n`;
+      output += `        PCIe Generation\n`;
+      output += `            Max                           : 4\n`;
+      output += `            Current                       : 4\n`;
+      output += `        Link Width\n`;
+      output += `            Max                           : 16x\n`;
+      output += `            Current                       : 16x\n\n`;
+
+      const reasons = deriveThrottleReasons(g);
+      const active = (v: boolean) => (v ? "Active" : "Not Active");
+      output += `Fan Speed                                 : N/A\n`;
+      output += `Performance State                         : P0\n`;
+      output += `Clocks Throttle Reasons\n`;
+      output += `    Idle                                  : ${active(reasons.idle)}\n`;
+      output += `    Applications Clocks Setting           : ${active(reasons.appClocksSetting)}\n`;
+      output += `    SW Power Cap                          : ${active(reasons.swPowerCap)}\n`;
+      output += `    HW Slowdown                           : ${active(reasons.hwSlowdown)}\n`;
+      output += `    HW Thermal Slowdown                   : ${active(reasons.hwThermalSlowdown)}\n`;
+      output += `    HW Power Brake Slowdown               : ${active(reasons.hwPowerBrakeSlowdown)}\n`;
+      output += `    Sync Boost                            : ${active(reasons.syncBoost)}\n`;
+      output += `    SW Thermal Slowdown                   : ${active(reasons.swThermalSlowdown)}\n`;
+      output += `    Display Clock Setting                 : ${active(reasons.displayClockSetting)}\n\n`;
+
+      output += `FB Memory Usage\n`;
+      output += `    Total                                 : ${g.memoryTotal} MiB\n`;
+      output += `    Reserved                              : ${Math.round(g.memoryTotal * 0.02)} MiB\n`;
+      output += `    Used                                  : ${g.memoryUsed} MiB\n`;
+      output += `    Free                                  : ${g.memoryTotal - g.memoryUsed} MiB\n\n`;
+
+      output += `BAR1 Memory Usage\n`;
+      output += `    Total                                 : ${specs.gpu.bar1MemoryMiB} MiB\n`;
+      output += `    Used                                  : 1 MiB\n`;
+      output += `    Free                                  : ${specs.gpu.bar1MemoryMiB - 1} MiB\n\n`;
+
+      output += `Compute Mode                              : ${g.computeMode}\n\n`;
+
+      const isCritical = g.healthStatus === "Critical";
+
+      output += `Utilization\n`;
+      output += `    Gpu                                   : ${isCritical ? "ERR!" : g.utilization + " %"}\n`;
+      output += `    Memory                                : 0 %\n`;
+      output += `    Encoder                               : 0 %\n`;
+      output += `    Decoder                               : 0 %\n\n`;
+
+      output += `ECC Mode\n`;
+      output += `    Current                               : ${g.eccEnabled ? "Enabled" : "Disabled"}\n`;
+      output += `    Pending                               : ${g.eccEnabled ? "Enabled" : "Disabled"}\n\n`;
+
+      output += `ECC Errors\n`;
+      output += `    Volatile\n`;
+      output += `        SRAM Correctable                  : ${g.eccErrors.singleBit}\n`;
+      output += `        SRAM Uncorrectable                : ${g.eccErrors.doubleBit}\n`;
+      output += `        DRAM Correctable                  : ${g.eccErrors.singleBit}\n`;
+      output += `        DRAM Uncorrectable                : ${g.eccErrors.doubleBit}\n`;
+      output += `    Aggregate\n`;
+      output += `        SRAM Correctable                  : ${g.eccErrors.aggregated.singleBit}\n`;
+      output += `        SRAM Uncorrectable                : ${g.eccErrors.aggregated.doubleBit}\n`;
+      output += `        DRAM Correctable                  : ${g.eccErrors.aggregated.singleBit}\n`;
+      output += `        DRAM Uncorrectable                : ${g.eccErrors.aggregated.doubleBit}\n\n`;
+
+      const thermalThresh = getThermalThresholds(g.name || "");
+      output += `Temperature\n`;
+      output += `    GPU Current Temp                      : ${isCritical ? "ERR!" : Math.round(g.temperature) + " C"}\n`;
+      output += `    GPU Shutdown Temp                     : ${thermalThresh.shutdown} C\n`;
+      output += `    GPU Slowdown Temp                     : ${thermalThresh.slowdown} C\n`;
+      output += `    GPU Max Operating Temp                : ${thermalThresh.maxOp} C\n`;
+      output += `    GPU Target Temperature                : N/A\n`;
+      output += `    Memory Current Temp                   : ${isCritical ? "ERR!" : Math.round(g.temperature - 5) + " C"}\n`;
+      output += `    Memory Max Operating Temp             : 95 C\n\n`;
+
+      const powerBounds = getPowerLimitBounds(g.name);
+      output += `Power Readings\n`;
+      output += `    Power Management                      : Supported\n`;
+      output += `    Power Draw                            : ${g.powerDraw.toFixed(2)} W\n`;
+      output += `    Power Limit                           : ${g.powerLimit.toFixed(2)} W\n`;
+      output += `    Default Power Limit                   : ${g.powerLimit.toFixed(2)} W\n`;
+      output += `    Enforced Power Limit                  : ${g.powerLimit.toFixed(2)} W\n`;
+      output += `    Min Power Limit                       : ${powerBounds.min.toFixed(2)} W\n`;
+      output += `    Max Power Limit                       : ${powerBounds.max.toFixed(2)} W\n\n`;
+
+      output += `Clocks\n`;
+      output += `    Graphics                              : ${g.clocksSM} MHz\n`;
+      output += `    SM                                    : ${g.clocksSM} MHz\n`;
+      output += `    Memory                                : ${g.clocksMem} MHz\n`;
+      output += `    Video                                 : 1275 MHz\n\n`;
+
+      output += `Applications Clocks\n`;
+      output += `    Graphics                              : 1410 MHz\n`;
+      output += `    Memory                                : 1215 MHz\n\n`;
+
+      output += `Max Clocks\n`;
+      output += `    Graphics                              : 1410 MHz\n`;
+      output += `    SM                                    : 1410 MHz\n`;
+      output += `    Memory                                : 1215 MHz\n`;
+      output += `    Video                                 : 1275 MHz\n\n`;
+    });
+
+    return output;
+  }
+
+  private formatMIGList(
+    gpus: GPU[],
+    listType: "gi" | "gi-profile" | "ci-profile",
+  ): string {
+    if (listType === "gi-profile" || listType === "ci-profile") {
+      let output =
+        "+-----------------------------------------------------------------------------+\n";
+      output +=
+        "| GPU instance profiles:                                                       |\n";
+      output +=
+        "| GPU   Name             ID    Instances   Memory     P2P    SM    DEC   ENC  |\n";
+      output +=
+        "|                              Free/Total   GiB        CE                      |\n";
+      output +=
+        "|=============================================================================|\n";
+
+      gpus.forEach((gpu) => {
+        if (gpu.migMode) {
+          MIG_PROFILES.forEach((profile) => {
+            const usedInstances = gpu.migInstances.filter(
+              (mi) => mi.profileId === profile.id,
+            ).length;
+            const freeInstances = profile.maxInstances - usedInstances;
+            output += `|   ${gpu.id}  ${profile.name.padEnd(17)} ${profile.id.toString().padStart(2)}     ${freeInstances}/${profile.maxInstances}        ${profile.memory.toFixed(2).padStart(5)}       ${profile.maxInstances === 1 ? "Yes" : "No ".padEnd(3)}     ${profile.computeSlices.toString().padStart(2)}     ${Math.floor(profile.computeSlices / 14)}     0   |\n`;
+          });
+        }
+      });
+
+      output +=
+        "+-----------------------------------------------------------------------------+\n";
+      return output;
+    } else {
+      // List GPU instances
+      let output =
+        "+-----------------------------------------------------------------------+\n";
+      output +=
+        "| GPU instances:                                                         |\n";
+      output += "| GPU   Name          Profile  Instance   Placement  |\n";
+      output += "|                       ID       ID       Start:Size  |\n";
+      output +=
+        "|=======================================================================|\n";
+
+      gpus.forEach((gpu) => {
+        if (gpu.migInstances.length > 0) {
+          gpu.migInstances.forEach((gi) => {
+            const profile = MIG_PROFILES.find((p) => p.id === gi.profileId);
+            output += `|   ${gpu.id}  ${profile?.name.padEnd(13)} ${gi.profileId.toString().padStart(2)}        ${gi.id.toString().padStart(2)}          0:${profile?.computeSlices.toString().padStart(2)}     |\n`;
+          });
+        } else if (gpu.migMode) {
+          output += `|   ${gpu.id}  No MIG devices configured                                    |\n`;
+        }
+      });
+
+      output +=
+        "+-----------------------------------------------------------------------+\n";
+      return output;
+    }
+  }
+}

@@ -1,0 +1,866 @@
+import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
+import { immer } from "zustand/middleware/immer";
+import { createDebouncedStorage } from "@/utils/debouncedStorage";
+import type {
+  ClusterConfig,
+  GPU,
+  HealthStatus,
+  XIDError,
+  InfiniBandHCA,
+  InfiniBandPort,
+} from "@/types/hardware";
+import type {
+  Scenario,
+  ScenarioProgress,
+  ExamState,
+  ExamBreakdown,
+} from "@/types/scenarios";
+import type { ValidationResult, ValidationConfig } from "@/types/validation";
+import {
+  createDefaultCluster,
+  createCustomCluster,
+  isValidCluster,
+} from "@/utils/clusterFactory";
+import type { SystemType } from "@/data/hardwareSpecs";
+import { useLearningProgressStore } from "./learningProgressStore";
+import { logger } from "@/utils/logger";
+// isTierUnlocked will be used in isScenarioAccessible once scenarios have tiers
+// import { isTierUnlocked } from '@/utils/tierProgressionEngine';
+
+// ============================================================================
+// TOOL FAMILY MAPPING
+// ============================================================================
+
+/**
+ * Maps command names to their command family IDs for tracking tool usage
+ */
+const toolFamilyMap: Record<string, string | string[]> = {
+  // GPU Monitoring tools
+  "nvidia-smi": ["gpu-monitoring", "xid-diagnostics"],
+  nvsm: "gpu-monitoring",
+  dcgmi: ["gpu-monitoring", "xid-diagnostics"],
+  nvtop: "gpu-monitoring",
+  // InfiniBand tools
+  ibstat: "infiniband-tools",
+  perfquery: "infiniband-tools",
+  ibdiagnet: "infiniband-tools",
+  iblinkinfo: "infiniband-tools",
+  // BMC/Hardware tools
+  ipmitool: "bmc-hardware",
+  sensors: "bmc-hardware",
+  dmidecode: "bmc-hardware",
+  // Cluster tools
+  sinfo: "cluster-tools",
+  squeue: "cluster-tools",
+  scontrol: "cluster-tools",
+  sacct: "cluster-tools",
+  // Container tools
+  docker: "container-tools",
+  enroot: "container-tools",
+  pyxis: "container-tools",
+  // Diagnostics
+  "dcgmi diag": ["diagnostics", "xid-diagnostics"],
+  "nvidia-bug-report.sh": ["diagnostics", "xid-diagnostics"],
+  "gpu-burn": "diagnostics",
+  // XID Diagnostics
+  dmesg: "xid-diagnostics",
+};
+
+interface SimulationState {
+  // Cluster state
+  cluster: ClusterConfig;
+  systemType: SystemType;
+  selectedNode: string | null;
+
+  // Simulation control
+  isRunning: boolean;
+  simulationSpeed: number; // 1.0 = real-time, 2.0 = 2x speed
+
+  // Metrics
+  metricsInterval: number; // ms between metric updates
+  lastMetricsUpdate: number;
+
+  // Scenario & Lab state
+  activeScenario: Scenario | null;
+  activeLabId: string | null;
+  scenarioProgress: Record<string, ScenarioProgress>;
+  completedScenarios: string[];
+
+  /** @internal snapshot of cluster before scenario entry */
+  _clusterSnapshot: ClusterConfig | null;
+
+  // Exam state
+  activeExam: ExamState | null;
+
+  // Quiz results for active scenario (stepId → correct)
+  quizResults: Record<string, boolean>;
+
+  // Validation state
+  stepValidation: Record<string, ValidationResult>; // key: "scenarioId-stepId"
+  validationConfig: ValidationConfig;
+
+  // Visualization navigation state
+  requestedVisualizationView: "topology" | "network" | null;
+
+  // Actions
+  setCluster: (cluster: ClusterConfig) => void;
+  setSystemType: (systemType: SystemType) => void;
+  selectNode: (nodeId: string) => void;
+  updateGPU: (nodeId: string, gpuId: number, updates: Partial<GPU>) => void;
+  updateHCA: (
+    nodeId: string,
+    hcaId: number,
+    portNumber: number,
+    updates: Partial<InfiniBandPort>,
+  ) => void;
+  updateHCAs: (nodeId: string, hcas: InfiniBandHCA[]) => void;
+  updateNodeHealth: (nodeId: string, health: HealthStatus) => void;
+  setBugReportCollected: (nodeId: string, value: boolean) => void;
+  addXIDError: (nodeId: string, gpuId: number, error: XIDError) => void;
+  setMIGMode: (nodeId: string, gpuId: number, enabled: boolean) => void;
+  setSlurmState: (
+    nodeId: string,
+    state: "idle" | "alloc" | "drain" | "down",
+    reason?: string,
+  ) => void;
+
+  // Cross-tool state synchronization actions
+  allocateGPUsForJob: (
+    nodeId: string,
+    gpuIds: number[],
+    jobId: number,
+    targetUtilization?: number,
+  ) => void;
+  deallocateGPUsForJob: (jobId: number) => void;
+  setClusterPowerLimit: (nodeId: string, limitWatts: number) => void;
+  getClusterPowerLimit: (nodeId: string) => number | null;
+
+  // Scenario & Lab actions
+  loadScenario: (scenario: Scenario) => void;
+  startLab: (labId: string) => void;
+  completeScenarioStep: (scenarioId: string, stepId: string) => void;
+  exitScenario: () => void;
+
+  // Lab Panel visibility (responsive UI)
+  labPanelVisible: boolean;
+  setLabPanelVisible: (visible: boolean) => void;
+  toggleLabPanel: () => void;
+
+  // Hint actions
+  revealHint: (scenarioId: string, stepId: string, hintId: string) => void;
+  recordCommand: (scenarioId: string, stepId: string, command: string) => void;
+  recordFailedAttempt: (scenarioId: string, stepId: string) => void;
+
+  // Quiz result tracking
+  recordQuizResult: (stepId: string, correct: boolean) => void;
+
+  // Learning progress integration
+  trackToolUsage: (command: string) => void;
+
+  // Validation actions
+  validateStep: (
+    scenarioId: string,
+    stepId: string,
+    result: ValidationResult,
+  ) => void;
+  clearStepValidation: (scenarioId: string, stepId: string) => void;
+  updateValidationConfig: (config: Partial<ValidationConfig>) => void;
+
+  // Exam actions
+  startExam: (examId: string) => void;
+  submitExamAnswer: (
+    questionId: string,
+    answer: number | number[] | string,
+  ) => void;
+  toggleQuestionFlag: (questionId: string) => void;
+  endExam: (breakdown: ExamBreakdown) => ExamBreakdown | null;
+  exitExam: () => void;
+
+  // Simulation lifecycle
+  startSimulation: () => void;
+  stopSimulation: () => void;
+  resetSimulation: () => void;
+  setSimulationSpeed: (speed: number) => void;
+
+  // Visualization navigation
+  setRequestedVisualizationView: (view: "topology" | "network" | null) => void;
+
+  // Persistence
+  exportCluster: () => string;
+  importCluster: (json: string) => void;
+}
+
+export const useSimulationStore = create<SimulationState>()(
+  persist(
+    immer((set, get) => ({
+      // Initial state
+      cluster: createDefaultCluster(),
+      systemType: "DGX-A100" as SystemType,
+      selectedNode: null,
+      // ON by default, and correct here BECAUSE Phase 3 is present: an injected
+      // fault is a persistent activeFaultHeatWatts heat term, so the tick no
+      // longer normalizes the evidence away. These two are coupled and must
+      // ship together -- release/phase1-2 deliberately carries `false` since it
+      // predates Phase 3, so a merge of that branch into this line MUST resolve
+      // to `true` here. This comment exists so that resolution is an explicit
+      // conflict rather than a silent one: without a change on this side, git
+      // would keep the tranche's `false` and quietly ship the tick disabled.
+      isRunning: true,
+      simulationSpeed: 1.0,
+      metricsInterval: 1000,
+      lastMetricsUpdate: Date.now(),
+
+      // Scenario & Lab state
+      activeScenario: null,
+      activeLabId: null,
+      scenarioProgress: {},
+      completedScenarios: [],
+
+      // Cluster snapshot for scenario restore
+      _clusterSnapshot: null as ClusterConfig | null,
+
+      // Exam state
+      activeExam: null,
+
+      // Quiz results for active scenario
+      quizResults: {},
+
+      // Validation state
+      stepValidation: {},
+      validationConfig: {
+        enabled: true,
+        immediatefeedback: true,
+        autoAdvance: true,
+        autoAdvanceDelay: 1500, // 1.5 seconds
+        showProgress: true,
+        soundEffects: false,
+      },
+
+      // Visualization navigation
+      requestedVisualizationView: null,
+
+      // Actions
+      setCluster: (cluster) => set({ cluster }),
+
+      setSystemType: (systemType) =>
+        set((state) => {
+          // The architecture lock during scenarios is enforced here, not just
+          // by the selector's `disabled` attribute. Bypassing the DOM lock must
+          // not rebuild the global cluster (and wipe global faults) mid-scenario.
+          if (state.activeScenario) return;
+          state.systemType = systemType;
+          state.cluster = createCustomCluster(8, systemType);
+          state.selectedNode = null;
+        }),
+
+      selectNode: (nodeId) => set({ selectedNode: nodeId }),
+
+      updateGPU: (nodeId, gpuId, updates) =>
+        set((state) => {
+          const node = state.cluster.nodes.find((n) => n.id === nodeId);
+          if (!node) return;
+          const gpu = node.gpus.find((g) => g.id === gpuId);
+          if (!gpu) return;
+
+          // Clamp values to physical bounds
+          if (updates.temperature !== undefined) {
+            updates.temperature = Math.max(
+              0,
+              Math.min(120, updates.temperature),
+            );
+          }
+          if (updates.memoryUsed !== undefined) {
+            updates.memoryUsed = Math.max(
+              0,
+              Math.min(gpu.memoryTotal, updates.memoryUsed),
+            );
+          }
+          if (updates.utilization !== undefined) {
+            updates.utilization = Math.max(
+              0,
+              Math.min(100, updates.utilization),
+            );
+          }
+          if (updates.powerDraw !== undefined) {
+            updates.powerDraw = Math.max(
+              0,
+              Math.min(gpu.powerLimit * 1.1, updates.powerDraw),
+            );
+          }
+
+          Object.assign(gpu, updates);
+        }),
+
+      updateHCA: (nodeId, hcaId, portNumber, updates) =>
+        set((state) => {
+          const node = state.cluster.nodes.find((n) => n.id === nodeId);
+          if (!node) return;
+          const hca = node.hcas.find((h) => h.id === hcaId);
+          if (!hca) return;
+          const port = hca.ports.find((p) => p.portNumber === portNumber);
+          if (!port) return;
+          Object.assign(port, updates);
+        }),
+
+      updateHCAs: (nodeId, hcas) =>
+        set((state) => {
+          const node = state.cluster.nodes.find((n) => n.id === nodeId);
+          if (node) {
+            node.hcas = hcas;
+          }
+        }),
+
+      updateNodeHealth: (nodeId, health) =>
+        set((state) => {
+          const node = state.cluster.nodes.find((n) => n.id === nodeId);
+          if (node) {
+            node.healthStatus = health;
+          }
+        }),
+
+      setBugReportCollected: (nodeId, value) =>
+        set((state) => {
+          const node = state.cluster.nodes.find((n) => n.id === nodeId);
+          if (node) {
+            node.bugReportCollected = value;
+          }
+        }),
+
+      addXIDError: (nodeId, gpuId, error) =>
+        set((state) => {
+          const node = state.cluster.nodes.find((n) => n.id === nodeId);
+          if (node) {
+            const gpu = node.gpus.find((g) => g.id === gpuId);
+            if (gpu) {
+              gpu.xidErrors.push(error);
+            }
+          }
+        }),
+
+      setMIGMode: (nodeId, gpuId, enabled) =>
+        set((state) => {
+          const node = state.cluster.nodes.find((n) => n.id === nodeId);
+          if (node) {
+            const gpu = node.gpus.find((g) => g.id === gpuId);
+            if (gpu) {
+              gpu.migMode = enabled;
+              gpu.migInstances = enabled ? gpu.migInstances : [];
+            }
+          }
+        }),
+
+      setSlurmState: (nodeId, slurmState, reason) =>
+        set((state) => {
+          const node = state.cluster.nodes.find((n) => n.id === nodeId);
+          if (node) {
+            node.slurmState = slurmState;
+            node.slurmReason = reason;
+          }
+        }),
+
+      // Cross-tool state synchronization
+      allocateGPUsForJob: (nodeId, gpuIds, jobId, targetUtilization = 85) =>
+        set((state) => {
+          const node = state.cluster.nodes.find((n) => n.id === nodeId);
+          if (node) {
+            for (const gpu of node.gpus) {
+              if (gpuIds.includes(gpu.id)) {
+                gpu.utilization = targetUtilization + (Math.random() * 10 - 5); // Add jitter
+                gpu.memoryUsed = Math.floor(
+                  gpu.memoryTotal * (0.7 + Math.random() * 0.2),
+                );
+                gpu.powerDraw = gpu.powerLimit * (0.75 + Math.random() * 0.15);
+                gpu.temperature = 65 + Math.random() * 15;
+                gpu.allocatedJobId = jobId;
+              }
+            }
+          }
+        }),
+
+      deallocateGPUsForJob: (jobId) =>
+        set((state) => {
+          for (const node of state.cluster.nodes) {
+            for (const gpu of node.gpus) {
+              if (gpu.allocatedJobId === jobId) {
+                gpu.utilization = Math.random() * 5; // Idle utilization
+                gpu.memoryUsed = Math.floor(gpu.memoryTotal * 0.01);
+                gpu.powerDraw = gpu.powerLimit * 0.15;
+                gpu.temperature = 35 + Math.random() * 10;
+                gpu.allocatedJobId = undefined;
+              }
+            }
+          }
+        }),
+
+      setClusterPowerLimit: (nodeId, limitWatts) =>
+        set((state) => {
+          const node = state.cluster.nodes.find((n) => n.id === nodeId);
+          if (node) {
+            node.clusterPowerLimit = limitWatts;
+            for (const gpu of node.gpus) {
+              gpu.powerLimit = Math.min(
+                gpu.powerLimit,
+                limitWatts / node.gpus.length,
+              );
+            }
+          }
+        }),
+
+      getClusterPowerLimit: (nodeId) => {
+        const state = get();
+        const node = state.cluster.nodes.find((n) => n.id === nodeId);
+        return node?.clusterPowerLimit ?? null;
+      },
+
+      // Scenario & Lab actions
+      loadScenario: (scenario) => {
+        // Snapshot current cluster for restore on scenario exit
+        const snapshot = structuredClone(get().cluster);
+
+        set((state) => {
+          state._clusterSnapshot = snapshot;
+          state.activeScenario = scenario;
+          // Clear stale validation results for this scenario
+          for (const key of Object.keys(state.stepValidation)) {
+            if (key.startsWith(scenario.id + "-")) {
+              delete state.stepValidation[key];
+            }
+          }
+          state.quizResults = {};
+          state.scenarioProgress[scenario.id] = {
+            scenarioId: scenario.id,
+            startTime: Date.now(),
+            completed: false,
+            currentStepIndex: 0,
+            steps: scenario.steps.map((step) => ({
+              stepId: step.id,
+              startTime: 0,
+              completed: false,
+              validationsPassed: 0,
+              validationsTotal: step.validationRules?.length || 0,
+              hintsRevealed: 0,
+              commandsExecuted: [],
+              lastCommandTime: undefined,
+              failedAttempts: 0,
+              revealedHintIds: [],
+            })),
+            totalTimeSpent: 0,
+            hintsUsed: 0,
+            validationAttempts: 0,
+            validationFailures: 0,
+          };
+
+          // Start first step
+          const progress = state.scenarioProgress[scenario.id];
+          if (progress && progress.steps[0]) {
+            progress.steps[0].startTime = Date.now();
+          }
+        });
+      },
+
+      startLab: (labId) => set({ activeLabId: labId }),
+
+      completeScenarioStep: (scenarioId, stepId) => {
+        let nextStepIndex = -1;
+
+        set((state) => {
+          const progress = state.scenarioProgress[scenarioId];
+          if (!progress) return;
+
+          const stepIndex = progress.steps.findIndex(
+            (s) => s.stepId === stepId,
+          );
+          if (stepIndex === -1) return;
+
+          // Update the step
+          progress.steps[stepIndex].completed = true;
+          progress.steps[stepIndex].endTime = Date.now();
+
+          // Start next step if exists
+          nextStepIndex = stepIndex + 1;
+          if (nextStepIndex < progress.steps.length) {
+            progress.steps[nextStepIndex].startTime = Date.now();
+          }
+
+          // Check if all steps completed
+          const allCompleted = progress.steps.every((s) => s.completed);
+
+          progress.currentStepIndex = Math.min(
+            nextStepIndex,
+            progress.steps.length - 1,
+          );
+          progress.completed = allCompleted;
+          if (allCompleted) {
+            progress.endTime = Date.now();
+          }
+
+          if (allCompleted && !state.completedScenarios.includes(scenarioId)) {
+            state.completedScenarios.push(scenarioId);
+          }
+        });
+
+        // Apply auto-faults for the next step (outside Immer set)
+        // Uses dynamic import to avoid circular dependency with scenarioContext
+        const currentState = get();
+        const scenario = currentState.activeScenario;
+        if (
+          scenario &&
+          nextStepIndex >= 0 &&
+          nextStepIndex < scenario.steps.length
+        ) {
+          const nextStep = scenario.steps[nextStepIndex];
+          if (nextStep.autoFaults && nextStep.autoFaults.length > 0) {
+            Promise.all([
+              import("@/store/scenarioContext"),
+              import("@/utils/scenarioLoader"),
+            ]).then(
+              ([{ scenarioContextManager }, { applyFaultsToContext }]) => {
+                const activeContext = scenarioContextManager.getActiveContext();
+                if (activeContext) {
+                  applyFaultsToContext(nextStep.autoFaults!, activeContext);
+                }
+              },
+            );
+          }
+        }
+      },
+
+      exitScenario: () => {
+        const snapshot = get()._clusterSnapshot;
+
+        set((state) => {
+          state.activeScenario = null;
+          state.quizResults = {};
+          if (snapshot) {
+            state.cluster = snapshot;
+          }
+          state._clusterSnapshot = null;
+        });
+
+        // Clean up sandbox contexts (dynamic import to avoid circular deps)
+        import("@/store/scenarioContext").then(({ scenarioContextManager }) => {
+          scenarioContextManager.clearAll();
+        });
+      },
+
+      // Hint actions
+      revealHint: (scenarioId, stepId, hintId) =>
+        set((state) => {
+          const progress = state.scenarioProgress[scenarioId];
+          if (!progress) return;
+
+          const stepIndex = progress.steps.findIndex(
+            (s) => s.stepId === stepId,
+          );
+          if (stepIndex === -1) return;
+
+          const step = progress.steps[stepIndex];
+
+          // Add hint ID to revealed list if not already there
+          if (!step.revealedHintIds.includes(hintId)) {
+            step.revealedHintIds.push(hintId);
+            step.hintsRevealed += 1;
+            progress.hintsUsed += 1;
+          }
+        }),
+
+      recordCommand: (scenarioId, stepId, command) =>
+        set((state) => {
+          const progress = state.scenarioProgress[scenarioId];
+          if (!progress) return;
+
+          const stepIndex = progress.steps.findIndex(
+            (s) => s.stepId === stepId,
+          );
+          if (stepIndex === -1) return;
+
+          const step = progress.steps[stepIndex];
+          step.commandsExecuted.push(command);
+          step.lastCommandTime = Date.now();
+        }),
+
+      recordFailedAttempt: (scenarioId, stepId) =>
+        set((state) => {
+          const progress = state.scenarioProgress[scenarioId];
+          if (!progress) return;
+
+          const stepIndex = progress.steps.findIndex(
+            (s) => s.stepId === stepId,
+          );
+          if (stepIndex === -1) return;
+
+          progress.steps[stepIndex].failedAttempts += 1;
+          progress.validationAttempts += 1;
+          progress.validationFailures += 1;
+        }),
+
+      recordQuizResult: (stepId, correct) =>
+        set((state) => {
+          state.quizResults[stepId] = correct;
+        }),
+
+      // Learning progress integration
+      trackToolUsage: (command: string) => {
+        let bestMatch = "";
+        for (const toolKey in toolFamilyMap) {
+          if (
+            command.startsWith(toolKey) &&
+            toolKey.length > bestMatch.length
+          ) {
+            bestMatch = toolKey;
+          }
+        }
+
+        if (bestMatch) {
+          const familyIds = toolFamilyMap[bestMatch];
+          const ids = Array.isArray(familyIds) ? familyIds : [familyIds];
+          const baseCommand = bestMatch.split(" ")[0];
+          for (const familyId of ids) {
+            useLearningProgressStore
+              .getState()
+              .markToolUsed(familyId, baseCommand);
+          }
+        }
+      },
+
+      // Validation actions
+      validateStep: (scenarioId, stepId, result) => {
+        const key = `${scenarioId}-${stepId}`;
+        const currentState = get();
+
+        set((state) => {
+          state.stepValidation[key] = result;
+        });
+
+        // Auto-advance if validation passed and config allows
+        // Skip auto-advance when the step has an inline quiz — the quiz
+        // must be answered first, then LabWorkspace advances manually.
+        if (result.passed && currentState.validationConfig.autoAdvance) {
+          const scenario = currentState.activeScenario;
+          const step = scenario?.steps.find((s) => s.id === stepId);
+          const hasQuiz = !!step?.narrativeQuiz;
+
+          if (!hasQuiz) {
+            setTimeout(() => {
+              get().completeScenarioStep(scenarioId, stepId);
+            }, currentState.validationConfig.autoAdvanceDelay);
+          }
+        }
+
+        // Record failed attempt if validation failed
+        if (!result.passed) {
+          get().recordFailedAttempt(scenarioId, stepId);
+        }
+      },
+
+      clearStepValidation: (scenarioId, stepId) =>
+        set((state) => {
+          const key = `${scenarioId}-${stepId}`;
+          delete state.stepValidation[key];
+        }),
+
+      updateValidationConfig: (config) =>
+        set((state) => {
+          Object.assign(state.validationConfig, config);
+        }),
+
+      // Exam actions
+      startExam: (examId) =>
+        set((state) => {
+          state.activeExam = {
+            examId,
+            startTime: Date.now(),
+            timeRemaining: 90 * 60, // 90 minutes in seconds
+            answers: {},
+            currentQuestionIndex: 0,
+            flaggedQuestions: [],
+            answeredQuestions: [],
+            submitted: false,
+          };
+        }),
+
+      submitExamAnswer: (questionId, answer) =>
+        set((state) => {
+          if (!state.activeExam) return;
+          state.activeExam.answers[questionId] = answer;
+          if (!state.activeExam.answeredQuestions.includes(questionId)) {
+            state.activeExam.answeredQuestions.push(questionId);
+          }
+        }),
+
+      toggleQuestionFlag: (questionId) =>
+        set((state) => {
+          if (!state.activeExam) return;
+          const idx = state.activeExam.flaggedQuestions.indexOf(questionId);
+          if (idx >= 0) {
+            state.activeExam.flaggedQuestions.splice(idx, 1);
+          } else {
+            state.activeExam.flaggedQuestions.push(questionId);
+          }
+        }),
+
+      endExam: (breakdown: ExamBreakdown) => {
+        const currentState = get();
+        if (!currentState.activeExam) return null;
+
+        set((state) => {
+          if (state.activeExam) {
+            state.activeExam.submitted = true;
+            state.activeExam.endTime = Date.now();
+            state.activeExam.breakdown = breakdown;
+          }
+        });
+
+        return breakdown;
+      },
+
+      exitExam: () => set({ activeExam: null }),
+
+      startSimulation: () => set({ isRunning: true }),
+      stopSimulation: () => set({ isRunning: false }),
+
+      resetSimulation: () =>
+        set((state) => {
+          state.cluster = createCustomCluster(8, state.systemType);
+          state.selectedNode = null;
+          state.isRunning = false;
+          state.simulationSpeed = 1.0;
+        }),
+
+      setSimulationSpeed: (speed) => set({ simulationSpeed: speed }),
+
+      // Visualization navigation
+      setRequestedVisualizationView: (view) =>
+        set({ requestedVisualizationView: view }),
+
+      exportCluster: () => {
+        const state = get();
+        return JSON.stringify(state.cluster, null, 2);
+      },
+
+      importCluster: (json) => {
+        try {
+          const cluster = JSON.parse(json) as ClusterConfig;
+          set({ cluster });
+        } catch (error) {
+          logger.error("Failed to import cluster:", error);
+        }
+      },
+
+      // Lab Panel visibility state
+      labPanelVisible: true, // Default to visible
+
+      setLabPanelVisible: (visible: boolean) =>
+        set({ labPanelVisible: visible }),
+
+      toggleLabPanel: () =>
+        set((state) => {
+          state.labPanelVisible = !state.labPanelVisible;
+        }),
+    })),
+    {
+      name: "nvidia-simulator-storage",
+      version: 3,
+      migrate: (persistedState: unknown, version: number) => {
+        // v0 → v1: cpuCount was persisted as socket count (2) instead of total
+        // cores (sockets × coresPerSocket).
+        // v1 → v2 (Phase 6): InfiniBandHCA/InfiniBandPort's shape changed --
+        // caType was redefined from a display string to the real per-HCA
+        // RDMA device name, a new required `model` field was added, and 4
+        // new required traffic-counter fields (xmitDataBytes/rcvDataBytes/
+        // xmitPkts/rcvPkts) were added. isValidCluster's shape check never
+        // inspects `hcas` at all, so an old v1 blob would otherwise survive
+        // merge() verbatim with these fields undefined -- the tick loop's
+        // `port.xmitDataBytes + 12500000` would compute NaN on the very
+        // first tick under load and never recover (NaN + anything is NaN).
+        //
+        // v2 → v3: InfiniBand port LIDs were only unique within a node, so
+        // every node's mlx5_0 shared LID 100. LIDs are addresses that
+        // ibping/iblinkinfo resolve to a host, so a persisted v2 fabric would
+        // keep answering ambiguously forever. Values, not shape -- nothing
+        // crashes -- but the cluster must be rebuilt to pick up unique ones.
+        //
+        // All migrations drop ONLY the stale cluster so the factory
+        // rebuilds it with the current shape; preserve the user's
+        // scenarioProgress, completedScenarios, and settings rather than
+        // wiping everything. Any version below the current one (older OR
+        // an unrecognized future build) is treated the same way: drop the
+        // cluster and let merge()/the factory rebuild it, rather than
+        // trusting a cluster shaped by an unknown schema version.
+        if (persistedState && typeof persistedState === "object") {
+          const next = { ...(persistedState as Record<string, unknown>) };
+          if (version !== 3) {
+            delete next.cluster;
+          }
+          return next;
+        }
+        return persistedState as Record<string, unknown>;
+      },
+      // Sanitize the persisted cluster on EVERY rehydrate (not just version
+      // bumps). A corrupted/partial localStorage blob — a null node, a node
+      // missing `gpus`, or `nodes` that is not an array — would otherwise be
+      // trusted verbatim and crash components that iterate nodes/gpus unguarded.
+      // If the persisted cluster fails the shape check, rebuild a fresh one for
+      // the persisted (or current) systemType; all other persisted state
+      // (progress, settings) is preserved.
+      merge: (persisted, current) => {
+        const c = current as SimulationState;
+        const p = (persisted ?? {}) as Partial<SimulationState>;
+        // Backfill fields added after a user's cluster was first persisted
+        // (e.g. GPU.computeMode) so isValidCluster's shape-only check doesn't
+        // let older blobs through with those fields silently undefined.
+        const safeCluster = isValidCluster(p.cluster)
+          ? {
+              ...p.cluster,
+              nodes: p.cluster.nodes.map((node) => ({
+                ...node,
+                gpus: node.gpus.map((gpu) => ({
+                  ...gpu,
+                  computeMode: gpu.computeMode ?? "Default",
+                })),
+              })),
+            }
+          : createCustomCluster(8, p.systemType ?? c.systemType);
+        return { ...c, ...p, cluster: safeCluster };
+      },
+      storage: createJSONStorage(() => createDebouncedStorage(2000)),
+      partialize: (state) => ({
+        // Strip session-scoped remediation flags (node.bugReportCollected /
+        // gpu.rmaStatus) so they do not survive a page reload. These track
+        // in-session remediation progress; persisting them would let a returning
+        // user satisfy the RMA gate or see "RMA pending" without doing the work.
+        cluster: {
+          ...state.cluster,
+          nodes: state.cluster.nodes.map((node) => {
+            const persistedNode = {
+              ...node,
+              gpus: node.gpus.map((gpu) => {
+                const persistedGpu = { ...gpu };
+                delete persistedGpu.rmaStatus;
+                return persistedGpu;
+              }),
+            };
+            delete persistedNode.bugReportCollected;
+            return persistedNode;
+          }),
+        },
+        systemType: state.systemType,
+        simulationSpeed: state.simulationSpeed,
+        scenarioProgress: Object.fromEntries(
+          Object.entries(state.scenarioProgress).map(([id, progress]) => [
+            id,
+            {
+              ...progress,
+              steps: progress.steps.map((step) => ({
+                ...step,
+                commandsExecuted: step.commandsExecuted.slice(-5),
+              })),
+            },
+          ]),
+        ),
+        completedScenarios: state.completedScenarios,
+      }),
+    },
+  ),
+);

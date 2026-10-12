@@ -1,0 +1,780 @@
+/**
+ * ScenarioContext - Provides isolated state execution for scenarios
+ *
+ * Each scenario runs in its own context with a copy of the cluster state.
+ * Changes are tracked and can optionally be merged back to the main state.
+ */
+
+import type {
+  ClusterConfig,
+  GPU,
+  DGXNode as Node,
+  HealthStatus,
+  InfiniBandHCA,
+  InfiniBandPort,
+  XIDError,
+} from "@/types/hardware";
+import type { SeedJob } from "@/types/scenarios";
+import { useSimulationStore } from "./simulationStore";
+import { logger } from "@/utils/logger";
+import { EventLog } from "@/simulation/eventLog";
+
+/**
+ * Base interface for all state changes
+ */
+interface StateChangeBase {
+  timestamp: number;
+  nodeId?: string;
+  gpuId?: number;
+  command?: string;
+  description?: string;
+}
+
+/**
+ * Discriminated union type for state changes with properly typed data
+ */
+export type StateChange =
+  | (StateChangeBase & { type: "gpu-update"; data: Partial<GPU> })
+  | (StateChangeBase & {
+      type: "hca-update";
+      hcaId: number;
+      portNumber: number;
+      data: Partial<InfiniBandPort>;
+    })
+  | (StateChangeBase & { type: "node-update"; data: Partial<Node> })
+  | (StateChangeBase & { type: "node-health"; data: { health: HealthStatus } })
+  | (StateChangeBase & { type: "xid-error"; data: XIDError })
+  | (StateChangeBase & {
+      type: "slurm-state";
+      data: { state: "idle" | "alloc" | "drain" | "down"; reason?: string };
+    })
+  | (StateChangeBase & { type: "mig-mode"; data: { enabled: boolean } })
+  | (StateChangeBase & { type: "node-add"; data: Node });
+
+/**
+ * Cap on how many mutation records are retained in memory. The tick loop
+ * (useMetricsSimulation) can call mutation-recording methods once per second
+ * per changed GPU, so an unbounded array would grow without limit over a
+ * long session. `getMutationCount()` still increments forever (see
+ * `mutationCount`) so callers that poll for "did anything change" keep
+ * working; only the retained history is bounded.
+ */
+const MAX_RETAINED_MUTATIONS = 500;
+
+export class ScenarioContext {
+  private scenarioId: string;
+  private isolatedCluster: ClusterConfig;
+  private mutations: StateChange[] = [];
+  /**
+   * Monotonically increasing count of mutations ever recorded, independent
+   * of how many are actually retained in `mutations`. Used by
+   * `getMutationCount()` so re-render-polling consumers (e.g. Dashboard)
+   * keep detecting change even after the retained array is capped.
+   */
+  private mutationCount = 0;
+  private startTime: number;
+  private readonly: boolean = false;
+  private eventLog: EventLog;
+  private seedJobs: SeedJob[] = [];
+  // Keyed by `${nodeId}:${canonicalServiceName}` so each node has its own
+  // service state, matching real multi-node systemd behavior.
+  private serviceStates: Map<string, "active" | "inactive"> = new Map();
+
+  constructor(scenarioId: string, baseCluster?: ClusterConfig) {
+    this.scenarioId = scenarioId;
+    this.startTime = Date.now();
+
+    // Use provided cluster or get from store
+    const cluster = baseCluster || useSimulationStore.getState().cluster;
+
+    // Deep clone to prevent reference issues
+    this.isolatedCluster = structuredClone(cluster);
+    this.eventLog = new EventLog();
+  }
+
+  /**
+   * Get the current isolated cluster state
+   */
+  getCluster(): ClusterConfig {
+    return this.isolatedCluster;
+  }
+
+  /**
+   * Get a specific node from the isolated state
+   */
+  getNode(nodeId: string): Node | undefined {
+    return this.isolatedCluster.nodes.find((n) => n.id === nodeId);
+  }
+
+  /**
+   * Get a specific GPU from the isolated state
+   */
+  getGPU(nodeId: string, gpuId: number): GPU | undefined {
+    const node = this.getNode(nodeId);
+    return node?.gpus.find((g: GPU) => g.id === gpuId);
+  }
+
+  /**
+   * Get the event log for this scenario context
+   */
+  getEventLog(): EventLog {
+    return this.eventLog;
+  }
+
+  /**
+   * Record a mutation: append to the bounded retained history and bump the
+   * monotonic counter. Keeps `mutations` capped at MAX_RETAINED_MUTATIONS
+   * while `mutationCount` keeps incrementing forever.
+   *
+   * The tick loop calls updateGPU() once per second per changed GPU, so
+   * "gpu-update" entries dominate volume and would fill the cap within
+   * seconds of ticking. Evict the oldest "gpu-update" first so rarer,
+   * more meaningful entries (xid-error, node-health, slurm-state, node-add)
+   * survive — falling back to oldest-overall only once no gpu-update
+   * entries remain to drop.
+   */
+  private recordMutation(change: StateChange): void {
+    this.mutations.push(change);
+    this.mutationCount++;
+    if (this.mutations.length > MAX_RETAINED_MUTATIONS) {
+      const index = this.mutations.findIndex((m) => m.type === "gpu-update");
+      if (index !== -1) {
+        this.mutations.splice(index, 1);
+      } else {
+        this.mutations.shift();
+      }
+    }
+  }
+
+  /**
+   * Update a GPU in the isolated state
+   */
+  updateGPU(
+    nodeId: string,
+    gpuId: number,
+    updates: Partial<GPU>,
+    command?: string,
+  ): void {
+    if (this.readonly) {
+      logger.warn("Cannot update GPU in readonly context");
+      return;
+    }
+
+    const node = this.getNode(nodeId);
+    if (!node) {
+      logger.error(`Node ${nodeId} not found in scenario context`);
+      return;
+    }
+
+    const gpu = node.gpus.find((g: GPU) => g.id === gpuId);
+    if (!gpu) {
+      logger.error(`GPU ${gpuId} not found on node ${nodeId}`);
+      return;
+    }
+
+    // Apply updates
+    Object.assign(gpu, updates);
+
+    // Track mutation
+    this.recordMutation({
+      type: "gpu-update",
+      timestamp: Date.now(),
+      nodeId,
+      gpuId,
+      data: updates,
+      command,
+      description: `Updated GPU ${gpuId} on ${nodeId}`,
+    });
+  }
+
+  /**
+   * Update an HCA port in the isolated state
+   */
+  updateHCA(
+    nodeId: string,
+    hcaId: number,
+    portNumber: number,
+    updates: Partial<InfiniBandPort>,
+    command?: string,
+  ): void {
+    if (this.readonly) {
+      logger.warn("Cannot update HCA in readonly context");
+      return;
+    }
+
+    const node = this.getNode(nodeId);
+    if (!node) {
+      logger.error(`Node ${nodeId} not found in scenario context`);
+      return;
+    }
+
+    const hca = node.hcas.find((h: InfiniBandHCA) => h.id === hcaId);
+    if (!hca) {
+      logger.error(`HCA ${hcaId} not found on node ${nodeId}`);
+      return;
+    }
+
+    const port = hca.ports.find((p) => p.portNumber === portNumber);
+    if (!port) {
+      logger.error(`Port ${portNumber} not found on HCA ${hcaId}`);
+      return;
+    }
+
+    // Apply updates
+    Object.assign(port, updates);
+
+    // Track mutation
+    this.recordMutation({
+      type: "hca-update",
+      timestamp: Date.now(),
+      nodeId,
+      hcaId,
+      portNumber,
+      data: updates,
+      command,
+      description: `Updated HCA ${hcaId} port ${portNumber} on ${nodeId}`,
+    });
+  }
+
+  /**
+   * Update node health status in isolated state
+   */
+  updateNodeHealth(
+    nodeId: string,
+    health: HealthStatus,
+    command?: string,
+  ): void {
+    if (this.readonly) {
+      logger.warn("Cannot update node health in readonly context");
+      return;
+    }
+
+    const node = this.getNode(nodeId);
+    if (!node) {
+      logger.error(`Node ${nodeId} not found in scenario context`);
+      return;
+    }
+
+    node.healthStatus = health;
+
+    this.recordMutation({
+      type: "node-health",
+      timestamp: Date.now(),
+      nodeId,
+      data: { health },
+      command,
+      description: `Set ${nodeId} health to ${health}`,
+    });
+  }
+
+  /**
+   * Add XID error to GPU in isolated state
+   */
+  addXIDError(
+    nodeId: string,
+    gpuId: number,
+    error: XIDError,
+    command?: string,
+  ): void {
+    if (this.readonly) {
+      logger.warn("Cannot add XID error in readonly context");
+      return;
+    }
+
+    const gpu = this.getGPU(nodeId, gpuId);
+    if (!gpu) {
+      logger.error(`GPU ${gpuId} not found on node ${nodeId}`);
+      return;
+    }
+
+    if (!gpu.xidErrors) {
+      gpu.xidErrors = [];
+    }
+    gpu.xidErrors.push(error);
+
+    this.recordMutation({
+      type: "xid-error",
+      timestamp: Date.now(),
+      nodeId,
+      gpuId,
+      data: error,
+      command,
+      description: `Added XID ${error.code} to GPU ${gpuId}`,
+    });
+  }
+
+  /**
+   * Set MIG mode for GPU in isolated state
+   */
+  setMIGMode(
+    nodeId: string,
+    gpuId: number,
+    enabled: boolean,
+    command?: string,
+  ): void {
+    if (this.readonly) {
+      logger.warn("Cannot set MIG mode in readonly context");
+      return;
+    }
+
+    const gpu = this.getGPU(nodeId, gpuId);
+    if (!gpu) {
+      logger.error(`GPU ${gpuId} not found on node ${nodeId}`);
+      return;
+    }
+
+    // MIG is tracked differently in our GPU type
+    if (enabled && !gpu.migInstances) {
+      gpu.migInstances = [];
+    } else if (!enabled) {
+      gpu.migInstances = []; // Empty array instead of undefined
+    }
+
+    this.recordMutation({
+      type: "mig-mode",
+      timestamp: Date.now(),
+      nodeId,
+      gpuId,
+      data: { enabled },
+      command,
+      description: `Set MIG mode to ${enabled} for GPU ${gpuId}`,
+    });
+  }
+
+  /**
+   * Set Slurm state for node in isolated state
+   */
+  setSlurmState(
+    nodeId: string,
+    state: "idle" | "alloc" | "drain" | "down",
+    reason?: string,
+    command?: string,
+  ): void {
+    if (this.readonly) {
+      logger.warn("Cannot set Slurm state in readonly context");
+      return;
+    }
+
+    const node = this.getNode(nodeId);
+    if (!node) {
+      logger.error(`Node ${nodeId} not found in scenario context`);
+      return;
+    }
+
+    node.slurmState = state;
+    if (reason) {
+      node.slurmReason = reason;
+    }
+
+    this.recordMutation({
+      type: "slurm-state",
+      timestamp: Date.now(),
+      nodeId,
+      data: { state, reason },
+      command,
+      description: `Set ${nodeId} Slurm state to ${state}`,
+    });
+  }
+
+  /**
+   * Add a new node to the isolated cluster state
+   */
+  addNode(node: Node): void {
+    if (this.readonly) {
+      logger.warn("Cannot add node in readonly context");
+      return;
+    }
+
+    // Avoid duplicates
+    if (this.getNode(node.id)) {
+      logger.warn(`Node ${node.id} already exists in scenario context`);
+      return;
+    }
+
+    this.isolatedCluster.nodes.push(node);
+
+    this.recordMutation({
+      type: "node-add",
+      timestamp: Date.now(),
+      nodeId: node.id,
+      data: node,
+      description: `Added node ${node.id} to cluster`,
+    });
+  }
+
+  /**
+   * Allocate GPUs for a Slurm job in isolated state
+   */
+  allocateGPUsForJob(
+    nodeId: string,
+    gpuIds: number[],
+    jobId: number,
+    targetUtilization = 85,
+  ): void {
+    if (this.readonly) {
+      logger.warn("Cannot allocate GPUs in readonly context");
+      return;
+    }
+
+    const node = this.getNode(nodeId);
+    if (!node) {
+      logger.error(`Node ${nodeId} not found in scenario context`);
+      return;
+    }
+
+    for (const gpu of node.gpus) {
+      if (gpuIds.includes(gpu.id)) {
+        const updates: Partial<GPU> = {
+          utilization: targetUtilization + (Math.random() * 10 - 5),
+          memoryUsed: Math.floor(gpu.memoryTotal * (0.7 + Math.random() * 0.2)),
+          powerDraw: gpu.powerLimit * (0.75 + Math.random() * 0.15),
+          temperature: 65 + Math.random() * 15,
+          allocatedJobId: jobId,
+        };
+        this.updateGPU(nodeId, gpu.id, updates);
+      }
+    }
+  }
+
+  /**
+   * Deallocate GPUs from a Slurm job in isolated state
+   */
+  deallocateGPUsForJob(jobId: number): void {
+    if (this.readonly) {
+      logger.warn("Cannot deallocate GPUs in readonly context");
+      return;
+    }
+
+    for (const node of this.isolatedCluster.nodes) {
+      for (const gpu of node.gpus) {
+        if (gpu.allocatedJobId === jobId) {
+          const updates: Partial<GPU> = {
+            utilization: Math.random() * 5,
+            memoryUsed: Math.floor(gpu.memoryTotal * 0.01),
+            powerDraw: gpu.powerLimit * 0.15,
+            temperature: 35 + Math.random() * 10,
+            allocatedJobId: undefined,
+          };
+          this.updateGPU(node.id, gpu.id, updates);
+        }
+      }
+    }
+  }
+
+  /**
+   * Get recent mutations that have been applied, bounded to the most recent
+   * MAX_RETAINED_MUTATIONS (older entries are dropped; see `recordMutation`).
+   */
+  getMutations(): StateChange[] {
+    return [...this.mutations];
+  }
+
+  /**
+   * Get the total mutation count. This is a monotonically increasing
+   * counter of every mutation ever recorded — it does NOT reflect the size
+   * of the (bounded) retained `mutations` array, so polling consumers keep
+   * detecting change even after the retained history is capped.
+   */
+  getMutationCount(): number {
+    return this.mutationCount;
+  }
+
+  /**
+   * Apply recently-retained mutations to the global state (bounded to the
+   * most recent MAX_RETAINED_MUTATIONS; see `recordMutation`).
+   * Used when we want to merge scenario changes back
+   */
+  applyToGlobalState(): void {
+    if (this.readonly) {
+      logger.warn("Cannot apply changes from readonly context");
+      return;
+    }
+
+    const store = useSimulationStore.getState();
+
+    // Apply each mutation to the global state
+    this.mutations.forEach((mutation) => {
+      switch (mutation.type) {
+        case "gpu-update":
+          if (mutation.nodeId !== undefined && mutation.gpuId !== undefined) {
+            store.updateGPU(mutation.nodeId, mutation.gpuId, mutation.data);
+          }
+          break;
+
+        case "hca-update":
+          if (mutation.nodeId !== undefined) {
+            store.updateHCA(
+              mutation.nodeId,
+              mutation.hcaId,
+              mutation.portNumber,
+              mutation.data,
+            );
+          }
+          break;
+
+        case "node-health":
+          if (mutation.nodeId) {
+            store.updateNodeHealth(mutation.nodeId, mutation.data.health);
+          }
+          break;
+
+        case "xid-error":
+          if (mutation.nodeId !== undefined && mutation.gpuId !== undefined) {
+            store.addXIDError(mutation.nodeId, mutation.gpuId, mutation.data);
+          }
+          break;
+
+        case "mig-mode":
+          if (mutation.nodeId !== undefined && mutation.gpuId !== undefined) {
+            store.setMIGMode(
+              mutation.nodeId,
+              mutation.gpuId,
+              mutation.data.enabled,
+            );
+          }
+          break;
+
+        case "slurm-state":
+          if (mutation.nodeId) {
+            store.setSlurmState(
+              mutation.nodeId,
+              mutation.data.state,
+              mutation.data.reason,
+            );
+          }
+          break;
+
+        default:
+          logger.warn(`Unknown mutation type: ${mutation.type}`);
+      }
+    });
+
+    logger.debug(
+      `Applied ${this.mutations.length} mutations from scenario ${this.scenarioId} to global state`,
+    );
+  }
+
+  /**
+   * Reset the context to initial state
+   */
+  reset(): void {
+    if (this.readonly) {
+      logger.warn("Cannot reset readonly context");
+      return;
+    }
+
+    const store = useSimulationStore.getState();
+    this.isolatedCluster = structuredClone(store.cluster);
+    this.mutations = [];
+    this.mutationCount = 0;
+    this.eventLog = new EventLog();
+    logger.debug(`Reset scenario context ${this.scenarioId}`);
+  }
+
+  /**
+   * Set context as readonly (no more mutations allowed)
+   */
+  setReadonly(readonly: boolean = true): void {
+    this.readonly = readonly;
+  }
+
+  /**
+   * Check if context is readonly
+   */
+  isReadonly(): boolean {
+    return this.readonly;
+  }
+
+  /**
+   * Get scenario runtime duration
+   */
+  getRuntimeMs(): number {
+    return Date.now() - this.startTime;
+  }
+
+  /**
+   * Export context state as JSON
+   */
+  export(): string {
+    return JSON.stringify(
+      {
+        scenarioId: this.scenarioId,
+        cluster: this.isolatedCluster,
+        mutations: this.mutations,
+        startTime: this.startTime,
+        runtime: this.getRuntimeMs(),
+      },
+      null,
+      2,
+    );
+  }
+
+  /**
+   * Create a snapshot of current isolated state
+   */
+  snapshot(): ClusterConfig {
+    return structuredClone(this.isolatedCluster);
+  }
+
+  /**
+   * Compare current state with initial state
+   */
+  getDiff(): StateChange[] {
+    // Return all mutations as they represent the diff
+    return this.getMutations();
+  }
+
+  // ── Seed Jobs (for allocate-job fault type) ──────────────────────
+
+  addSeedJob(job: SeedJob): void {
+    this.seedJobs.push(job);
+  }
+
+  getSeedJobs(): SeedJob[] {
+    return [...this.seedJobs];
+  }
+
+  clearSeedJobs(): void {
+    this.seedJobs = [];
+  }
+
+  // ── Service States (for systemctl simulation) ────────────────────
+
+  /**
+   * Canonicalize a systemd unit name. systemd treats `foo` and `foo.service`
+   * as the same unit, so we strip the trailing `.service` suffix when keying
+   * the state map.
+   */
+  private static canonicalizeServiceName(name: string): string {
+    return name.replace(/\.service$/i, "");
+  }
+
+  private serviceKey(nodeId: string, serviceName: string): string {
+    return `${nodeId}:${ScenarioContext.canonicalizeServiceName(serviceName)}`;
+  }
+
+  /**
+   * Get a service's current state on a specific node. Returns "active" by
+   * default if not set, matching real systemd behavior where most services
+   * are running unless explicitly marked otherwise by a scenario.
+   */
+  getServiceState(nodeId: string, serviceName: string): "active" | "inactive" {
+    return (
+      this.serviceStates.get(this.serviceKey(nodeId, serviceName)) ?? "active"
+    );
+  }
+
+  /**
+   * Set a service's state on a specific node. Used by scenarios to mark
+   * services as inactive, and by `systemctl start/stop/restart` to flip
+   * state at runtime.
+   */
+  setServiceState(
+    nodeId: string,
+    serviceName: string,
+    state: "active" | "inactive",
+  ): void {
+    if (this.readonly) {
+      logger.warn("Cannot set service state in readonly context");
+      return;
+    }
+    this.serviceStates.set(this.serviceKey(nodeId, serviceName), state);
+  }
+}
+
+// Context manager for multiple scenarios
+export class ScenarioContextManager {
+  private static instance: ScenarioContextManager;
+  private contexts: Map<string, ScenarioContext> = new Map();
+  private activeContextId: string | null = null;
+
+  private constructor() {}
+
+  static getInstance(): ScenarioContextManager {
+    if (!ScenarioContextManager.instance) {
+      ScenarioContextManager.instance = new ScenarioContextManager();
+    }
+    return ScenarioContextManager.instance;
+  }
+
+  /**
+   * Create a new scenario context
+   */
+  createContext(
+    scenarioId: string,
+    baseCluster?: ClusterConfig,
+  ): ScenarioContext {
+    const context = new ScenarioContext(scenarioId, baseCluster);
+    this.contexts.set(scenarioId, context);
+    logger.debug(`Created scenario context: ${scenarioId}`);
+    return context;
+  }
+
+  /**
+   * Get a scenario context
+   */
+  getContext(scenarioId: string): ScenarioContext | undefined {
+    return this.contexts.get(scenarioId);
+  }
+
+  /**
+   * Get or create a scenario context
+   */
+  getOrCreateContext(
+    scenarioId: string,
+    baseCluster?: ClusterConfig,
+  ): ScenarioContext {
+    let context = this.contexts.get(scenarioId);
+    if (!context) {
+      context = this.createContext(scenarioId, baseCluster);
+    }
+    return context;
+  }
+
+  /**
+   * Set the active context
+   */
+  setActiveContext(scenarioId: string | null): void {
+    this.activeContextId = scenarioId;
+    logger.debug(`Active scenario context: ${scenarioId || "none"}`);
+  }
+
+  /**
+   * Get the active context
+   */
+  getActiveContext(): ScenarioContext | undefined {
+    if (!this.activeContextId) return undefined;
+    return this.contexts.get(this.activeContextId);
+  }
+
+  /**
+   * Delete a context
+   */
+  deleteContext(scenarioId: string): boolean {
+    const deleted = this.contexts.delete(scenarioId);
+    if (deleted && this.activeContextId === scenarioId) {
+      this.activeContextId = null;
+    }
+    logger.debug(`Deleted scenario context: ${scenarioId}`);
+    return deleted;
+  }
+
+  /**
+   * Clear all contexts
+   */
+  clearAll(): void {
+    this.contexts.clear();
+    this.activeContextId = null;
+    logger.debug("Cleared all scenario contexts");
+  }
+
+  /**
+   * Get all context IDs
+   */
+  getContextIds(): string[] {
+    return Array.from(this.contexts.keys());
+  }
+}
+
+// Export singleton instance
+export const scenarioContextManager = ScenarioContextManager.getInstance();

@@ -1,0 +1,1527 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { NvidiaSmiSimulator } from "../nvidiaSmiSimulator";
+import { parse } from "@/utils/commandParser";
+import type { CommandContext } from "@/types/commands";
+import { useSimulationStore } from "@/store/simulationStore";
+
+// Mock the store
+vi.mock("@/store/simulationStore", () => ({
+  useSimulationStore: {
+    getState: vi.fn(() => ({
+      cluster: {
+        nodes: [
+          {
+            id: "dgx-00",
+            hostname: "dgx-node01",
+            systemType: "DGX-H100",
+            healthStatus: "OK",
+            nvidiaDriverVersion: "535.129.03",
+            cudaVersion: "12.2",
+            gpus: [
+              {
+                id: 0,
+                name: "NVIDIA H100 80GB HBM3",
+                type: "H100-SXM",
+                uuid: "GPU-12345678-1234-1234-1234-123456789012",
+                pciAddress: "0000:17:00.0",
+                temperature: 45,
+                powerDraw: 250,
+                powerLimit: 700,
+                memoryTotal: 81920,
+                memoryUsed: 1024,
+                utilization: 0,
+                clocksSM: 1980,
+                clocksMem: 2619,
+                eccEnabled: true,
+                eccErrors: {
+                  singleBit: 0,
+                  doubleBit: 0,
+                  aggregated: { singleBit: 0, doubleBit: 0 },
+                },
+                migMode: false,
+                migInstances: [],
+                nvlinks: [],
+                healthStatus: "OK",
+                xidErrors: [],
+                persistenceMode: true,
+              },
+              {
+                id: 1,
+                name: "NVIDIA H100 80GB HBM3",
+                type: "H100-SXM",
+                uuid: "GPU-12345678-1234-1234-1234-123456789013",
+                pciAddress: "0000:18:00.0",
+                temperature: 50,
+                powerDraw: 300,
+                powerLimit: 700,
+                memoryTotal: 81920,
+                memoryUsed: 40960,
+                utilization: 75,
+                clocksSM: 1980,
+                clocksMem: 2619,
+                eccEnabled: true,
+                eccErrors: {
+                  singleBit: 0,
+                  doubleBit: 0,
+                  aggregated: { singleBit: 0, doubleBit: 0 },
+                },
+                migMode: false,
+                migInstances: [],
+                nvlinks: [],
+                healthStatus: "OK",
+                xidErrors: [],
+                persistenceMode: true,
+              },
+            ],
+            hcas: [],
+          },
+        ],
+      },
+    })),
+  },
+}));
+
+describe("NvidiaSmiSimulator", () => {
+  let simulator: NvidiaSmiSimulator;
+  let context: CommandContext;
+
+  beforeEach(() => {
+    simulator = new NvidiaSmiSimulator();
+    context = {
+      currentNode: "dgx-00",
+      currentPath: "/root",
+      environment: {},
+      history: [],
+    };
+  });
+
+  describe("Basic Command", () => {
+    it("should execute nvidia-smi without flags", () => {
+      const parsed = parse("nvidia-smi");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("NVIDIA-SMI");
+      expect(result.output).toContain("H100");
+      expect(result.output).toContain("Driver Version");
+      expect(result.output).toContain("CUDA Version");
+    });
+
+    it("should display GPU table with correct format", () => {
+      const parsed = parse("nvidia-smi");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.output).toContain("No running processes found"); // Processes section
+      expect(result.output).toContain("GPU  Name");
+      expect(result.output).toContain("Persistence-M");
+    });
+  });
+
+  describe("List GPUs (-L flag)", () => {
+    it("should list all GPUs with -L flag", () => {
+      const parsed = parse("nvidia-smi -L");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("GPU 0:");
+      expect(result.output).toContain("GPU 1:");
+      expect(result.output).toContain("H100 80GB HBM3");
+      expect(result.output).toContain("UUID: GPU-");
+    });
+
+    it("should show correct UUID format", () => {
+      const parsed = parse("nvidia-smi -L");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.output).toMatch(
+        /UUID: GPU-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
+      );
+    });
+  });
+
+  describe("Query Command (-q flag)", () => {
+    it("should show detailed info with -q flag", () => {
+      const parsed = parse("nvidia-smi -q");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("GPU 00000000"); // Actual format
+      expect(result.output).toContain("Product Name");
+      expect(result.output).toContain("GPU Current Temp"); // Actual key name
+      expect(result.output).toContain("Power Draw");
+      expect(result.output).toContain("FB Memory Usage");
+    });
+
+    it("should show memory details with -q -d MEMORY", () => {
+      const parsed = parse("nvidia-smi -q -d MEMORY");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("FB Memory Usage");
+      expect(result.output).toContain("Total");
+      expect(result.output).toContain("Used");
+      expect(result.output).toContain("Free");
+      expect(result.output).toMatch(/\d+ MiB/);
+    });
+
+    it("should show specific GPU with -q -i 0", () => {
+      const parsed = parse("nvidia-smi -q -i 0");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("GPU 00000000"); // Actual format
+      expect(result.output).not.toContain("GPU 00000001"); // Second GPU
+    });
+
+    it("should handle invalid GPU ID", () => {
+      const parsed = parse("nvidia-smi -q -i 99");
+      const result = simulator.execute(parsed, context);
+
+      // Simulator validates GPU IDs and returns error for invalid index
+      expect(result.exitCode).not.toBe(0);
+      expect(result.output).toContain("GPU not found");
+    });
+
+    it("should reject a negative GPU index cleanly (F4)", () => {
+      // -5 is now consumed as the value of -i (not misparsed as option --5)
+      const parsed = parse("nvidia-smi -q -i -5");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).not.toBe(0);
+      expect(result.output).toContain("Invalid GPU index '-5'");
+      expect(result.output).not.toContain("unrecognized option");
+    });
+  });
+
+  describe("Help and Version", () => {
+    it("should show help with --help", () => {
+      const parsed = parse("nvidia-smi --help");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("nvidia-smi");
+      expect(result.output.length).toBeGreaterThan(0);
+    });
+
+    it("should show version with --version", () => {
+      const parsed = parse("nvidia-smi --version");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("NVIDIA-SMI version"); // Actual format
+      expect(result.output).toContain("NVML version"); // Note: lowercase 'v'
+    });
+  });
+
+  describe("GPU State Integration", () => {
+    it("should reflect GPU utilization", () => {
+      const parsed = parse("nvidia-smi");
+      const result = simulator.execute(parsed, context);
+
+      // GPU 0 has 0% utilization, GPU 1 has 75%
+      expect(result.output).toContain("0%"); // GPU 0
+      expect(result.output).toContain("75%"); // GPU 1
+    });
+
+    it("should show correct memory usage", () => {
+      const parsed = parse("nvidia-smi");
+      const result = simulator.execute(parsed, context);
+
+      // GPU 0: 1024 MiB used, GPU 1: 40960 MiB used (values already in MiB)
+      expect(result.output).toContain("1024MiB");
+      expect(result.output).toContain("40960MiB");
+    });
+
+    it("should show temperature values", () => {
+      const parsed = parse("nvidia-smi -q");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.output).toMatch(/GPU Current Temp\s+:\s+45 C/);
+      expect(result.output).toMatch(/GPU Current Temp\s+:\s+50 C/);
+    });
+
+    it("should show power usage", () => {
+      const parsed = parse("nvidia-smi");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.output).toContain("250W");
+      expect(result.output).toContain("300W");
+    });
+  });
+
+  describe("Edge Cases", () => {
+    it("should handle no GPUs gracefully", () => {
+      // Mock empty GPU list
+      vi.mocked(useSimulationStore.getState).mockReturnValueOnce({
+        cluster: {
+          nodes: [
+            {
+              id: "dgx-00",
+              hostname: "dgx-node01",
+              systemType: "DGX-H100",
+              healthStatus: "OK",
+              nvidiaDriverVersion: "535.129.03",
+              cudaVersion: "12.2",
+              gpus: [],
+              hcas: [],
+            },
+          ],
+        },
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } as any);
+
+      const parsed = parse("nvidia-smi");
+      const result = simulator.execute(parsed, context);
+
+      // Returns success with empty GPU listing
+      expect(result.exitCode).toBe(0);
+    });
+
+    it("should handle unknown flags gracefully", () => {
+      const parsed = parse("nvidia-smi --unknown-flag");
+      const result = simulator.execute(parsed, context);
+
+      // Simulator validates flags using fuzzy matching and returns error for unknown flags
+      expect(result.exitCode).not.toBe(0);
+      expect(result.output).toContain("unrecognized option");
+    });
+
+    it("should handle conflicting flags", () => {
+      const parsed = parse("nvidia-smi -L -q");
+      const result = simulator.execute(parsed, context);
+
+      // Should handle gracefully (typically one takes precedence)
+      expect(result.exitCode).toBe(0);
+    });
+  });
+
+  describe("Output Format", () => {
+    it("should maintain consistent column alignment", () => {
+      const parsed = parse("nvidia-smi");
+      const result = simulator.execute(parsed, context);
+
+      const lines = result.output.split("\n");
+      const headerLines = lines.filter((line) => line.includes("GPU  Name"));
+      expect(headerLines.length).toBeGreaterThan(0);
+
+      // Check for consistent separator lines
+      const separators = lines.filter((line) => line.includes("======="));
+      expect(separators.length).toBeGreaterThan(0);
+    });
+
+    it("should produce table output", () => {
+      const parsed = parse("nvidia-smi");
+      const result = simulator.execute(parsed, context);
+
+      // Verify table structure
+      expect(result.output).toContain("+-------");
+      expect(result.output).toContain("|");
+    });
+  });
+
+  describe("CommandDefinitionRegistry Integration", () => {
+    it("should have definition registry initialized after construction", async () => {
+      // Wait for async initialization (lazy-loaded JSON imports may take longer)
+      await vi.waitFor(
+        () => {
+          expect(simulator["definitionRegistry"]).not.toBeNull();
+        },
+        { timeout: 5000 },
+      );
+    });
+
+    it("should validate flags using registry", () => {
+      // Valid flag should not error
+      const parsed = parse("nvidia-smi -q");
+      const result = simulator.execute(parsed, context);
+      expect(result.exitCode).toBe(0);
+    });
+  });
+
+  describe("Help from JSON definitions", () => {
+    it("nvidia-smi --help should return registry-based help", async () => {
+      // Wait for lazy-loaded JSON definitions to be available
+      await vi.waitFor(
+        () => {
+          expect(simulator["definitionRegistry"]).not.toBeNull();
+        },
+        { timeout: 5000 },
+      );
+
+      const parsed = parse("nvidia-smi --help");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("nvidia-smi");
+      expect(result.output).toContain("Description:");
+      expect(result.output).toContain("Options:");
+    });
+  });
+
+  describe("Topology Matrix", () => {
+    it("should show uniform NVLink count for DGX NVSwitch topology", () => {
+      const parsed = parse("nvidia-smi topo -m");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).toBe(0);
+      // In a DGX H100 with NVSwitch, all GPU pairs should show NV18
+      const lines = result.output
+        .split("\n")
+        .filter((l) => l.startsWith("GPU"));
+      for (const line of lines) {
+        // Should NOT contain "NV6" for a full NVSwitch system
+        expect(line).not.toContain("NV6");
+        // Should contain NV18 for H100
+        expect(line).toContain("NV18");
+      }
+    });
+
+    it("should show X for self-connections", () => {
+      const parsed = parse("nvidia-smi topo -m");
+      const result = simulator.execute(parsed, context);
+
+      const lines = result.output
+        .split("\n")
+        .filter((l) => l.startsWith("GPU"));
+      // GPU0 line should have X in position 0, GPU1 line should have X in position 1, etc.
+      expect(lines[0]).toMatch(/GPU0\s+X/);
+      expect(lines[1]).toMatch(/GPU1\s+NV18\s+X/);
+    });
+  });
+
+  describe("Schema-aware parsing", () => {
+    it("should treat -q as a boolean flag and not consume the next token", () => {
+      // Regression: before parseWithSchema(), `nvidia-smi -q` could mis-parse
+      // if a subcommand followed, because -q eagerly consumed the next token.
+      const parsed = parse("nvidia-smi -q");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).toBe(0);
+      // -q should produce query output containing GPU details
+      expect(result.output).toContain("GPU");
+      expect(result.output).toContain("Product Name");
+    });
+
+    it("should treat -L as a boolean flag", () => {
+      const parsed = parse("nvidia-smi -L");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("GPU 0:");
+      expect(result.output).toContain("UUID: GPU-");
+    });
+
+    it("should allow -i to consume the next token as its value", () => {
+      // -i is a value flag, so `nvidia-smi -q -i 0` should parse -i with value "0"
+      const parsed = parse("nvidia-smi -q -i 0");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).toBe(0);
+      // Should show only GPU 0, not GPU 1
+      expect(result.output).toContain("GPU 00000000");
+      expect(result.output).not.toContain("GPU 00000001");
+    });
+
+    it("should correctly parse -q followed by -d as separate flags", () => {
+      // -q is boolean, so -d should not be swallowed as -q's value
+      const parsed = parse("nvidia-smi -q -d MEMORY");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("FB Memory Usage");
+      expect(result.output).toContain("Total");
+    });
+  });
+
+  describe("Bug Fixes: Driver Version, Architecture, and Memory", () => {
+    it("should show numeric driver version in -q output, not GPU name", () => {
+      const parsed = parse("nvidia-smi -q");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).toBe(0);
+      // Should show the node's driver version string, not the GPU name
+      expect(result.output).toContain(
+        "Driver Version                            : 535.129.03",
+      );
+      expect(result.output).not.toContain(
+        "Driver Version                            : NVIDIA H100 80GB HBM3",
+      );
+      // Should also show CUDA version
+      expect(result.output).toContain(
+        "CUDA Version                              : 12.2",
+      );
+    });
+
+    it("should show Hopper architecture for H100 GPUs in -q output", () => {
+      const parsed = parse("nvidia-smi -q");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain(
+        "Product Architecture                      : Hopper",
+      );
+      expect(result.output).not.toContain(
+        "Product Architecture                      : Ampere",
+      );
+    });
+
+    it("should not exceed hardware TDP for max power limit on SXM GPUs", () => {
+      const parsed = parse("nvidia-smi -q");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).toBe(0);
+      // H100 SXM max power = 700W, should NOT show 770W (which was 700 * 1.1)
+      expect(result.output).not.toContain("770");
+      const lines = result.output.split("\n");
+      const maxPowerLine = lines.find((l) => l.includes("Max Power Limit"));
+      if (maxPowerLine) {
+        const value = parseFloat(maxPowerLine.match(/(\d+\.?\d*)/)?.[1] || "0");
+        expect(value).toBeLessThanOrEqual(700);
+      }
+    });
+
+    it("should display memory in MiB without dividing by 1024 in default view", () => {
+      const parsed = parse("nvidia-smi");
+      const result = simulator.execute(parsed, context);
+
+      expect(result.exitCode).toBe(0);
+      // GPU memory values are already in MiB (81920 MiB = 80 GB for H100)
+      // Should show 81920MiB, not 80MiB (which was the result of dividing by 1024)
+      expect(result.output).toContain("81920MiB");
+      expect(result.output).not.toContain("80MiB");
+    });
+  });
+
+  describe("unsupported flags rejected explicitly (not silently ignored)", () => {
+    it("rejects -lgc instead of falling through to the default GPU table", () => {
+      const result = simulator.execute(
+        parse("nvidia-smi -lgc 1200,1500"),
+        context,
+      );
+      expect(result.exitCode).not.toBe(0);
+      expect(result.output).toContain("not supported in this simulator");
+    });
+
+    it("rejects -rgc instead of falling through to the default GPU table", () => {
+      const result = simulator.execute(parse("nvidia-smi -rgc"), context);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.output).toContain("not supported in this simulator");
+    });
+
+    it("rejects -x instead of falling through to the default GPU table", () => {
+      const result = simulator.execute(parse("nvidia-smi -x -q"), context);
+      expect(result.exitCode).not.toBe(0);
+      expect(result.output).toContain("not supported in this simulator");
+    });
+  });
+});
+
+describe("remediation routing", () => {
+  let simulator: NvidiaSmiSimulator;
+  let context: CommandContext;
+
+  beforeEach(() => {
+    simulator = new NvidiaSmiSimulator();
+    context = {
+      currentNode: "dgx-00",
+      currentPath: "/root",
+      environment: {},
+      history: [],
+    };
+  });
+
+  afterEach(() => vi.clearAllMocks());
+
+  // A faulted node with an updateGPU spy, returned by a local getState mock.
+  function buildContextWithSpy(
+    gpu: Partial<import("@/types/hardware").GPU>,
+    nodeOverrides: Partial<import("@/types/hardware").DGXNode> = {},
+  ) {
+    const baseGpu = {
+      id: 0,
+      uuid: "GPU-x",
+      // Exact HARDWARE_SPECS model string (not the display-only "NVIDIA H100
+      // 80GB HBM3" used elsewhere in this file) so architecture lookups like
+      // getPowerLimitBounds/getRatedTDP resolve real H100 bounds (200-700W)
+      // instead of silently falling back to A100's (100-400W).
+      name: "NVIDIA H100-SXM5-80GB",
+      type: "H100-SXM",
+      pciAddress: "0000:17:00.0",
+      temperature: 45,
+      powerDraw: 250,
+      powerLimit: 700,
+      memoryTotal: 81920,
+      memoryUsed: 1024,
+      utilization: 0,
+      clocksSM: 1980,
+      clocksMem: 2619,
+      eccEnabled: true,
+      eccErrors: {
+        singleBit: 0,
+        doubleBit: 0,
+        aggregated: { singleBit: 0, doubleBit: 0 },
+      },
+      migMode: false,
+      migInstances: [],
+      nvlinks: [],
+      healthStatus: "OK",
+      xidErrors: [],
+      persistenceMode: true,
+      ...gpu,
+    };
+    const updateGPU = vi.fn();
+    const state = {
+      cluster: {
+        nodes: [
+          {
+            id: "dgx-00",
+            hostname: "n",
+            systemType: "DGX-H100",
+            healthStatus: "OK",
+            slurmState: "idle",
+            gpus: [baseGpu],
+            hcas: [],
+            ...nodeOverrides,
+          },
+        ],
+      },
+      updateGPU,
+    };
+    vi.mocked(useSimulationStore.getState).mockReturnValue(state as never);
+    return { updateGPU };
+  }
+
+  it("--gpu-reset clears a critical XID and reports success", () => {
+    const { updateGPU } = buildContextWithSpy({
+      xidErrors: [
+        {
+          code: 43,
+          timestamp: new Date(),
+          description: "x",
+          severity: "Critical",
+        },
+      ],
+      healthStatus: "Critical",
+    });
+    const result = simulator.execute(
+      parse("nvidia-smi --gpu-reset -i 0"),
+      context,
+    );
+    expect(result.exitCode).toBe(0);
+    expect(updateGPU).toHaveBeenCalledWith(
+      "dgx-00",
+      0,
+      expect.objectContaining({ xidErrors: [], healthStatus: "OK" }),
+    );
+  });
+
+  it("--gpu-reset refuses an off-the-bus GPU (XID 79)", () => {
+    const { updateGPU } = buildContextWithSpy({
+      xidErrors: [
+        {
+          code: 79,
+          timestamp: new Date(),
+          description: "x",
+          severity: "Critical",
+        },
+      ],
+      healthStatus: "Critical",
+    });
+    const result = simulator.execute(
+      parse("nvidia-smi --gpu-reset -i 0"),
+      context,
+    );
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toMatch(/power-cycle/i);
+    expect(updateGPU).not.toHaveBeenCalled();
+  });
+
+  it("--gpu-reset is blocked while the node is allocated", () => {
+    const { updateGPU } = buildContextWithSpy(
+      {
+        xidErrors: [
+          {
+            code: 43,
+            timestamp: new Date(),
+            description: "x",
+            severity: "Critical",
+          },
+        ],
+        healthStatus: "Critical",
+      },
+      { slurmState: "alloc" },
+    );
+    const result = simulator.execute(
+      parse("nvidia-smi --gpu-reset -i 0"),
+      context,
+    );
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toMatch(/drain/i);
+    expect(updateGPU).not.toHaveBeenCalled();
+  });
+
+  it("--reset-ecc-errors clears double-bit ECC", () => {
+    const { updateGPU } = buildContextWithSpy({
+      eccErrors: {
+        singleBit: 0,
+        doubleBit: 5,
+        aggregated: { singleBit: 0, doubleBit: 5 },
+      },
+      healthStatus: "Critical",
+    });
+    const result = simulator.execute(
+      parse("nvidia-smi -i 0 --reset-ecc-errors"),
+      context,
+    );
+    expect(result.exitCode).toBe(0);
+    expect(updateGPU).toHaveBeenCalledWith(
+      "dgx-00",
+      0,
+      expect.objectContaining({
+        eccErrors: {
+          singleBit: 0,
+          doubleBit: 0,
+          aggregated: { singleBit: 0, doubleBit: 0 },
+        },
+        healthStatus: "OK",
+      }),
+    );
+  });
+
+  it("-p (short form of --reset-ecc-errors) clears double-bit ECC", () => {
+    const { updateGPU } = buildContextWithSpy({
+      eccErrors: {
+        singleBit: 0,
+        doubleBit: 5,
+        aggregated: { singleBit: 0, doubleBit: 5 },
+      },
+      healthStatus: "Critical",
+    });
+    const result = simulator.execute(parse("nvidia-smi -i 0 -p"), context);
+    expect(result.exitCode).toBe(0);
+    expect(updateGPU).toHaveBeenCalledWith(
+      "dgx-00",
+      0,
+      expect.objectContaining({
+        eccErrors: {
+          singleBit: 0,
+          doubleBit: 0,
+          aggregated: { singleBit: 0, doubleBit: 0 },
+        },
+        healthStatus: "OK",
+      }),
+    );
+  });
+
+  it("-pl resolves a thermal fault while setting the limit", () => {
+    const { updateGPU } = buildContextWithSpy({
+      temperature: 85,
+      activeFaultHeatWatts: 240,
+      healthStatus: "Warning",
+    });
+    const result = simulator.execute(parse("nvidia-smi -i 0 -pl 500"), context);
+    expect(result.exitCode).toBe(0);
+    expect(updateGPU).toHaveBeenCalledWith(
+      "dgx-00",
+      0,
+      expect.objectContaining({
+        powerLimit: 500,
+        activeFaultHeatWatts: 0,
+        healthStatus: "OK",
+      }),
+    );
+    const call = updateGPU.mock.calls[0][2] as Record<string, unknown>;
+    expect(call).not.toHaveProperty("temperature");
+  });
+
+  it("accepts a power limit above the GPU's CURRENT (already-capped) limit, using the fixed architecture ceiling instead", () => {
+    // Simulate a GPU a prior `-pl 150` already capped: current powerLimit is
+    // 150, well below this H100 fixture's real fixed ceiling (700W). The OLD
+    // buggy code derived the max bound from this CURRENT powerLimit (150),
+    // so -pl 350 would have been wrongly rejected (350 > 150). The fix must
+    // derive the max bound from the fixed architecture ceiling (700)
+    // instead, so 350 (<= 700) is accepted — this is the exact SIM-2
+    // regression guard.
+    buildContextWithSpy({ powerLimit: 150 });
+    const result = simulator.execute(parse("nvidia-smi -i 0 -pl 350"), context);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("350 W");
+  });
+
+  it("-q reports the fixed architecture Min/Max Power Limit, not values derived from the current (capped) limit", () => {
+    // A prior -pl already lowered the current limit to 150W; Min/Max Power
+    // Limit in `-q` output must still reflect H100's real fixed bounds
+    // (200-700W), not "100.00 W" / "150.00 W" derived from the current cap.
+    buildContextWithSpy({ powerLimit: 150 });
+    const result = simulator.execute(parse("nvidia-smi -q -i 0"), context);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain(
+      "Min Power Limit                       : 200.00 W",
+    );
+    expect(result.output).toContain(
+      "Max Power Limit                       : 700.00 W",
+    );
+  });
+
+  it("--query-gpu=power.max_limit reports the fixed architecture ceiling, not a value derived from the current (capped) limit", () => {
+    buildContextWithSpy({ powerLimit: 150 });
+    const result = simulator.execute(
+      parse("nvidia-smi --query-gpu=power.max_limit --format=csv,noheader"),
+      context,
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.output.trim()).toBe("700 W");
+  });
+
+  it("-pl rejects an out-of-range GPU index instead of crashing on node.gpus[gpuId].name", () => {
+    buildContextWithSpy({});
+    const result = simulator.execute(parse("nvidia-smi -i 5 -pl 300"), context);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain("Invalid GPU index");
+  });
+});
+
+describe("-e / --ecc-config", () => {
+  let simulator: NvidiaSmiSimulator;
+  let context: CommandContext;
+
+  beforeEach(() => {
+    simulator = new NvidiaSmiSimulator();
+    context = {
+      currentNode: "dgx-00",
+      currentPath: "/root",
+      environment: {},
+      history: [],
+    };
+
+    // A single-GPU node with a real updateGPU implementation (not just a
+    // spy) so the "persists" test below can observe a subsequent query
+    // reflecting the mutation, mirroring how the real StateMutator/store
+    // round-trip behaves.
+    const gpu: import("@/types/hardware").GPU = {
+      id: 0,
+      uuid: "GPU-ecc-config-0",
+      name: "NVIDIA H100-SXM5-80GB",
+      type: "H100-SXM",
+      pciAddress: "0000:17:00.0",
+      temperature: 45,
+      powerDraw: 250,
+      powerLimit: 700,
+      memoryTotal: 81920,
+      memoryUsed: 1024,
+      utilization: 0,
+      clocksSM: 1980,
+      clocksMem: 2619,
+      eccEnabled: true,
+      eccErrors: {
+        singleBit: 0,
+        doubleBit: 0,
+        aggregated: { singleBit: 0, doubleBit: 0 },
+      },
+      migMode: false,
+      migInstances: [],
+      nvlinks: [],
+      healthStatus: "OK",
+      xidErrors: [],
+      persistenceMode: true,
+    };
+
+    const state = {
+      cluster: {
+        nodes: [
+          {
+            id: "dgx-00",
+            hostname: "dgx-node01",
+            systemType: "DGX-H100",
+            healthStatus: "OK",
+            slurmState: "idle",
+            gpus: [gpu],
+            hcas: [],
+          },
+        ],
+      },
+      updateGPU: vi.fn(
+        (
+          nodeId: string,
+          gpuId: number,
+          updates: Partial<import("@/types/hardware").GPU>,
+        ) => {
+          const node = state.cluster.nodes.find((n) => n.id === nodeId);
+          if (node) {
+            Object.assign(node.gpus[gpuId], updates);
+          }
+        },
+      ),
+    };
+    vi.mocked(useSimulationStore.getState).mockReturnValue(state as never);
+  });
+
+  afterEach(() => vi.clearAllMocks());
+
+  it("enables ECC and reports the reboot requirement", () => {
+    const result = simulator.execute(parse("nvidia-smi -i 0 -e 1"), context);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("ECC support enabled");
+    expect(result.output).toContain("reset");
+  });
+
+  it("disables ECC", () => {
+    const result = simulator.execute(parse("nvidia-smi -i 0 -e 0"), context);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("ECC support disabled");
+  });
+
+  it("persists the change as pending, leaving the current mode alone until a reset", () => {
+    simulator.execute(parse("nvidia-smi -i 0 -e 0"), context);
+
+    const current = simulator.execute(
+      parse("nvidia-smi --query-gpu=ecc.mode.current --format=csv,noheader"),
+      context,
+    );
+    const pending = simulator.execute(
+      parse("nvidia-smi --query-gpu=ecc.mode.pending --format=csv,noheader"),
+      context,
+    );
+
+    // The command's own output says a reset/reboot is required, so the live
+    // mode must not have moved yet.
+    expect(current.output).toContain("Enabled");
+    expect(pending.output).toContain("Disabled");
+  });
+
+  it("applies the pending mode once the GPU is reset", () => {
+    simulator.execute(parse("nvidia-smi -i 0 -e 0"), context);
+    simulator.execute(parse("nvidia-smi --gpu-reset -i 0"), context);
+
+    const current = simulator.execute(
+      parse("nvidia-smi --query-gpu=ecc.mode.current --format=csv,noheader"),
+      context,
+    );
+
+    expect(current.output).toContain("Disabled");
+  });
+
+  it("rejects an out-of-range GPU index instead of silently no-oping", () => {
+    const result = simulator.execute(parse("nvidia-smi -i 5 -e 1"), context);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain("Invalid GPU index");
+  });
+
+  it("rejects a non-0/1 ECC value instead of silently disabling ECC", () => {
+    const result = simulator.execute(parse("nvidia-smi -i 0 -e 2"), context);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain("Invalid ECC config value");
+  });
+});
+
+describe("-c / --compute-mode", () => {
+  let simulator: NvidiaSmiSimulator;
+  let context: CommandContext;
+
+  beforeEach(() => {
+    simulator = new NvidiaSmiSimulator();
+    context = {
+      currentNode: "dgx-00",
+      currentPath: "/root",
+      environment: {},
+      history: [],
+    };
+
+    // A single-GPU node with a real updateGPU implementation (not just a
+    // spy) so the "reflects it in a later query" test below can observe a
+    // subsequent query reflecting the mutation, mirroring how the real
+    // StateMutator/store round-trip behaves. Same pattern as the
+    // -e/--ecc-config describe block above.
+    const gpu: import("@/types/hardware").GPU = {
+      id: 0,
+      uuid: "GPU-compute-mode-0",
+      name: "NVIDIA H100-SXM5-80GB",
+      type: "H100-SXM",
+      pciAddress: "0000:17:00.0",
+      temperature: 45,
+      powerDraw: 250,
+      powerLimit: 700,
+      memoryTotal: 81920,
+      memoryUsed: 1024,
+      utilization: 0,
+      clocksSM: 1980,
+      clocksMem: 2619,
+      eccEnabled: true,
+      eccErrors: {
+        singleBit: 0,
+        doubleBit: 0,
+        aggregated: { singleBit: 0, doubleBit: 0 },
+      },
+      migMode: false,
+      migInstances: [],
+      nvlinks: [],
+      healthStatus: "OK",
+      xidErrors: [],
+      persistenceMode: true,
+      computeMode: "Default",
+    };
+
+    const state = {
+      cluster: {
+        nodes: [
+          {
+            id: "dgx-00",
+            hostname: "dgx-node01",
+            systemType: "DGX-H100",
+            healthStatus: "OK",
+            slurmState: "idle",
+            gpus: [gpu],
+            hcas: [],
+          },
+        ],
+      },
+      updateGPU: vi.fn(
+        (
+          nodeId: string,
+          gpuId: number,
+          updates: Partial<import("@/types/hardware").GPU>,
+        ) => {
+          const node = state.cluster.nodes.find((n) => n.id === nodeId);
+          if (node) {
+            Object.assign(node.gpus[gpuId], updates);
+          }
+        },
+      ),
+    };
+    vi.mocked(useSimulationStore.getState).mockReturnValue(state as never);
+  });
+
+  afterEach(() => vi.clearAllMocks());
+
+  it("sets compute mode to Exclusive_Process and reflects it in a later query", () => {
+    const result = simulator.execute(parse("nvidia-smi -i 0 -c 3"), context);
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Exclusive_Process");
+
+    const queryResult = simulator.execute(
+      parse("nvidia-smi --query-gpu=compute_mode --format=csv,noheader"),
+      context,
+    );
+    expect(queryResult.output).toContain("Exclusive_Process");
+  });
+
+  it("rejects an out-of-range mode value", () => {
+    const result = simulator.execute(parse("nvidia-smi -i 0 -c 9"), context);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain("Invalid compute mode");
+  });
+
+  it("rejects an out-of-range GPU index instead of silently no-oping", () => {
+    const result = simulator.execute(parse("nvidia-smi -i 5 -c 3"), context);
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain("Invalid GPU index");
+  });
+
+  it("reflects a changed compute mode in the default (no-flag) table output", () => {
+    simulator.execute(parse("nvidia-smi -i 0 -c 3"), context);
+    const result = simulator.execute(parse("nvidia-smi"), context);
+    expect(result.exitCode).toBe(0);
+    // The compact table column abbreviates Exclusive_Process to "E. Process"
+    // (matching real nvidia-smi) rather than truncating it mid-word.
+    expect(result.output).toContain("E. Process");
+  });
+});
+
+describe("--query-gpu field consolidation (SIM-11 regression)", () => {
+  let simulator: NvidiaSmiSimulator;
+  let context: CommandContext;
+
+  beforeEach(() => {
+    simulator = new NvidiaSmiSimulator();
+    context = {
+      currentNode: "dgx-00",
+      currentPath: "/root",
+      environment: {},
+      history: [],
+    };
+
+    // Explicit single-GPU node so these tests don't depend on whatever
+    // mock state an earlier describe block left behind (a prior version
+    // of this suite only passed because an earlier test's
+    // mockReturnValue override was never reset before this block ran).
+    const gpu: import("@/types/hardware").GPU = {
+      id: 0,
+      uuid: "GPU-sim11-0000-0000-0000-000000000000",
+      name: "NVIDIA H100 80GB HBM3",
+      type: "H100-SXM",
+      pciAddress: "0000:17:00.0",
+      temperature: 45,
+      powerDraw: 250,
+      powerLimit: 700,
+      memoryTotal: 81920,
+      memoryUsed: 1024,
+      utilization: 0,
+      clocksSM: 1980,
+      clocksMem: 2619,
+      eccEnabled: true,
+      eccErrors: {
+        singleBit: 0,
+        doubleBit: 0,
+        aggregated: { singleBit: 0, doubleBit: 0 },
+      },
+      migMode: false,
+      migInstances: [],
+      nvlinks: [],
+      healthStatus: "OK",
+      xidErrors: [],
+      persistenceMode: true,
+      computeMode: "Default",
+    };
+
+    const state = {
+      cluster: {
+        nodes: [
+          {
+            id: "dgx-00",
+            hostname: "dgx-node01",
+            systemType: "DGX-H100",
+            healthStatus: "OK",
+            nvidiaDriverVersion: "535.129.03",
+            cudaVersion: "12.2",
+            gpus: [gpu],
+            hcas: [],
+          },
+        ],
+      },
+    };
+    vi.mocked(useSimulationStore.getState).mockReturnValue(state as never);
+  });
+
+  afterEach(() => vi.clearAllMocks());
+
+  it("serves pcie.link.gen.current (was allowlisted but unimplemented under the pci. prefix)", () => {
+    const result = simulator.execute(
+      parse(
+        "nvidia-smi --query-gpu=pcie.link.gen.current --format=csv,noheader",
+      ),
+      context,
+    );
+    expect(result.output.trim()).toBe("4");
+  });
+
+  it("serves nvlink.link5.state (was allowlisted but had no switch case)", () => {
+    const result = simulator.execute(
+      parse("nvidia-smi --query-gpu=nvlink.link5.state --format=csv,noheader"),
+      context,
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.output.trim()).not.toBe("[Not Supported]");
+  });
+
+  it("serves power.min_limit (was implemented but never allowlisted)", () => {
+    const result = simulator.execute(
+      parse("nvidia-smi --query-gpu=power.min_limit --format=csv,noheader"),
+      context,
+    );
+    expect(result.exitCode).toBe(0);
+    expect(result.output.trim()).toContain("W");
+  });
+
+  it("resolves every supported --query-gpu field to a real value, not [Not Supported]", () => {
+    // Every key currently declared in QUERY_FIELD_HANDLERS. If a handler is
+    // added or removed, update this list (and the count below) to match --
+    // the point of this test is that each declared field resolves to a real
+    // value instead of silently falling through to a placeholder.
+    const allFields = [
+      "driver_version",
+      "cuda_version",
+      "vbios_version",
+      "serial",
+      "gpu_name",
+      "name",
+      "gpu_uuid",
+      "uuid",
+      "index",
+      "gpu_bus_id",
+      "pci.bus_id",
+      "mig.mode.current",
+      "mig.mode.pending",
+      "memory.total",
+      "memory.used",
+      "memory.free",
+      "memory.reserved",
+      "utilization.gpu",
+      "utilization.memory",
+      "utilization.encoder",
+      "utilization.decoder",
+      "temperature.gpu",
+      "temperature.memory",
+      "temperature.gpu_tlimit",
+      "temperature.memory_max",
+      "power.draw",
+      "power.draw.average",
+      "power.draw.instant",
+      "power.limit",
+      "power.default_limit",
+      "power.min_limit",
+      "power.max_limit",
+      "power.management",
+      "enforced.power.limit",
+      "pci.domain",
+      "pci.bus",
+      "pci.device",
+      "pci.device_id",
+      "pci.sub_device_id",
+      "pcie.link.gen.current",
+      "pcie.link.gen.max",
+      "pcie.link.gen.gpucurrent",
+      "pcie.link.gen.gpumax",
+      "pcie.link.width.current",
+      "pcie.link.width.max",
+      "clocks.current.graphics",
+      "clocks.current.sm",
+      "clocks.sm",
+      "clocks.current.memory",
+      "clocks.mem",
+      "clocks.current.video",
+      "clocks.max.graphics",
+      "clocks.max.sm",
+      "clocks.max.memory",
+      "clocks.applications.graphics",
+      "clocks.applications.memory",
+      "ecc.mode.current",
+      "ecc.mode.pending",
+      "ecc.errors.corrected.volatile.device_memory",
+      "ecc.errors.corrected.volatile.dram",
+      "ecc.errors.corrected.volatile.sram",
+      "ecc.errors.corrected.volatile.total",
+      "ecc.errors.corrected.aggregate.device_memory",
+      "ecc.errors.corrected.aggregate.dram",
+      "ecc.errors.corrected.aggregate.sram",
+      "ecc.errors.corrected.aggregate.total",
+      "ecc.errors.uncorrected.volatile.device_memory",
+      "ecc.errors.uncorrected.volatile.dram",
+      "ecc.errors.uncorrected.volatile.sram",
+      "ecc.errors.uncorrected.volatile.total",
+      "ecc.errors.uncorrected.aggregate.device_memory",
+      "ecc.errors.uncorrected.aggregate.dram",
+      "ecc.errors.uncorrected.aggregate.sram",
+      "ecc.errors.uncorrected.aggregate.total",
+      "retired_pages.single_bit_ecc.count",
+      "retired_pages.sbe",
+      "retired_pages.double_bit.count",
+      "retired_pages.dbe",
+      "retired_pages.pending",
+      "compute_mode",
+      "display_mode",
+      "display_active",
+      "persistence_mode",
+      "pstate",
+      "performance_state",
+      "fan.speed",
+      "count",
+      "timestamp",
+      "nvlink.link0.state",
+      "nvlink.link1.state",
+      "nvlink.link2.state",
+      "nvlink.link3.state",
+      "nvlink.link4.state",
+      "nvlink.link5.state",
+      "accounting.mode",
+      "accounting.buffer_size",
+    ];
+    expect(allFields).toHaveLength(96);
+
+    const result = simulator.execute(
+      parse(
+        `nvidia-smi --query-gpu=${allFields.join(",")} --format=csv,noheader`,
+      ),
+      context,
+    );
+
+    expect(result.exitCode).toBe(0);
+    // A missing or broken handler would surface as the [Not Supported]
+    // placeholder (the old getGpuFieldValue fallback) -- none may appear.
+    expect(result.output).not.toContain("[Not Supported]");
+
+    // One row for the single mocked GPU: exactly one value per field, each
+    // non-empty. A dropped field or a value containing an embedded ", "
+    // would change the count.
+    const values = result.output.trim().split(", ");
+    expect(values).toHaveLength(allFields.length);
+    for (const value of values) {
+      expect(value).not.toBe("");
+    }
+  });
+
+  it("still rejects a genuinely unsupported field", () => {
+    const result = simulator.execute(
+      parse("nvidia-smi --query-gpu=not.a.real.field --format=csv,noheader"),
+      context,
+    );
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain("Invalid or unsupported query field");
+  });
+
+  it("rejects inherited Object.prototype keys as query fields (constructor, __proto__)", () => {
+    const constructorResult = simulator.execute(
+      parse("nvidia-smi --query-gpu=constructor --format=csv,noheader"),
+      context,
+    );
+    expect(constructorResult.exitCode).not.toBe(0);
+    expect(constructorResult.output).toContain(
+      "Invalid or unsupported query field",
+    );
+
+    const protoResult = simulator.execute(
+      parse("nvidia-smi --query-gpu=__proto__ --format=csv,noheader"),
+      context,
+    );
+    expect(protoResult.exitCode).not.toBe(0);
+    expect(protoResult.output).toContain("Invalid or unsupported query field");
+  });
+});
+
+describe("--format requirement and nounits (SIM-10)", () => {
+  let simulator: NvidiaSmiSimulator;
+  let context: CommandContext;
+
+  beforeEach(() => {
+    simulator = new NvidiaSmiSimulator();
+    context = {
+      currentNode: "dgx-00",
+      currentPath: "/root",
+      environment: {},
+      history: [],
+    };
+
+    const gpu: import("@/types/hardware").GPU = {
+      id: 0,
+      uuid: "GPU-sim10-0000-0000-0000-000000000000",
+      name: "NVIDIA H100 80GB HBM3",
+      type: "H100-SXM",
+      pciAddress: "0000:17:00.0",
+      temperature: 45,
+      powerDraw: 250,
+      powerLimit: 700,
+      memoryTotal: 81920,
+      memoryUsed: 1024,
+      utilization: 0,
+      clocksSM: 1980,
+      clocksMem: 2619,
+      eccEnabled: true,
+      eccErrors: {
+        singleBit: 0,
+        doubleBit: 0,
+        aggregated: { singleBit: 0, doubleBit: 0 },
+      },
+      migMode: false,
+      migInstances: [],
+      nvlinks: [],
+      healthStatus: "OK",
+      xidErrors: [],
+      persistenceMode: true,
+      computeMode: "Default",
+    };
+
+    const state = {
+      cluster: {
+        nodes: [
+          {
+            id: "dgx-00",
+            hostname: "dgx-node01",
+            systemType: "DGX-H100",
+            healthStatus: "OK",
+            nvidiaDriverVersion: "535.129.03",
+            cudaVersion: "12.2",
+            gpus: [gpu],
+            hcas: [],
+          },
+        ],
+      },
+    };
+    vi.mocked(useSimulationStore.getState).mockReturnValue(state as never);
+  });
+
+  afterEach(() => vi.clearAllMocks());
+
+  it("errors when --query-gpu is used without --format", () => {
+    const result = simulator.execute(
+      parse("nvidia-smi --query-gpu=memory.total"),
+      context,
+    );
+    expect(result.exitCode).not.toBe(0);
+    expect(result.output).toContain("--format");
+  });
+
+  it("succeeds when --format is provided", () => {
+    const result = simulator.execute(
+      parse("nvidia-smi --query-gpu=memory.total --format=csv,noheader"),
+      context,
+    );
+    expect(result.exitCode).toBe(0);
+  });
+
+  it("strips unit suffixes when nounits is requested", () => {
+    const result = simulator.execute(
+      parse(
+        "nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits",
+      ),
+      context,
+    );
+    expect(result.output.trim()).toMatch(/^\d+$/);
+  });
+
+  it("keeps unit suffixes when nounits is absent", () => {
+    const result = simulator.execute(
+      parse("nvidia-smi --query-gpu=memory.total --format=csv,noheader"),
+      context,
+    );
+    expect(result.output.trim()).toMatch(/MiB$/);
+  });
+
+  it("strips W and % suffixes too, not just MiB", () => {
+    const powerResult = simulator.execute(
+      parse("nvidia-smi --query-gpu=power.draw --format=csv,noheader,nounits"),
+      context,
+    );
+    expect(powerResult.output.trim()).toMatch(/^\d+$/);
+
+    const utilResult = simulator.execute(
+      parse(
+        "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits",
+      ),
+      context,
+    );
+    expect(utilResult.output.trim()).toMatch(/^\d+$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ECC mode is a pending change until the GPU is reset (bot review P2).
+//
+// `nvidia-smi -e 0|1` reports "All GPUs must be reset (or the machine
+// rebooted) for this setting to take effect", and nvidia-smi.json documents
+// the same. Applying it to the live mode immediately contradicts both, and
+// makes ecc.mode.current and ecc.mode.pending permanently identical when the
+// entire point of the pair is that they can differ.
+// ---------------------------------------------------------------------------
+describe("ECC mode pending vs current (bot review P2)", () => {
+  let simulator: NvidiaSmiSimulator;
+  let context: CommandContext;
+
+  function buildGpuState(gpu: Record<string, unknown> = {}) {
+    const baseGpu = {
+      id: 0,
+      uuid: "GPU-ecc00000-0000-0000-0000-000000000000",
+      name: "NVIDIA H100-SXM5-80GB",
+      type: "H100-SXM",
+      pciAddress: "0000:17:00.0",
+      temperature: 45,
+      powerDraw: 250,
+      powerLimit: 700,
+      memoryTotal: 81920,
+      memoryUsed: 1024,
+      utilization: 0,
+      clocksSM: 1980,
+      clocksMem: 2619,
+      eccEnabled: true,
+      eccErrors: {
+        singleBit: 0,
+        doubleBit: 0,
+        aggregated: { singleBit: 0, doubleBit: 0 },
+      },
+      migMode: false,
+      migInstances: [],
+      nvlinks: [],
+      healthStatus: "OK",
+      xidErrors: [],
+      persistenceMode: true,
+      computeMode: "Default",
+      ...gpu,
+    };
+    const updateGPU = vi.fn();
+    vi.mocked(useSimulationStore.getState).mockReturnValue({
+      cluster: {
+        nodes: [
+          {
+            id: "dgx-00",
+            hostname: "n",
+            systemType: "DGX-H100",
+            healthStatus: "OK",
+            slurmState: "idle",
+            gpus: [baseGpu],
+            hcas: [],
+          },
+        ],
+      },
+      updateGPU,
+    } as never);
+    return { updateGPU, baseGpu };
+  }
+
+  beforeEach(() => {
+    simulator = new NvidiaSmiSimulator();
+    context = {
+      currentNode: "dgx-00",
+      currentPath: "/root",
+      environment: {},
+      history: [],
+    };
+  });
+
+  it("stages -e 0 as the pending mode without changing the current mode", () => {
+    const { updateGPU } = buildGpuState({ eccEnabled: true });
+
+    const result = simulator.execute(parse("nvidia-smi -i 0 -e 0"), context);
+
+    expect(result.exitCode).toBe(0);
+    expect(updateGPU).toHaveBeenCalledWith(
+      "dgx-00",
+      0,
+      expect.objectContaining({ eccModePending: false }),
+    );
+    // The live mode must survive untouched until a reset.
+    const applied = updateGPU.mock.calls[0][2] as Record<string, unknown>;
+    expect(applied.eccEnabled).toBeUndefined();
+  });
+
+  it("reports current Enabled and pending Disabled after -e 0", () => {
+    buildGpuState({ eccEnabled: true, eccModePending: false });
+
+    const current = simulator.execute(
+      parse("nvidia-smi --query-gpu=ecc.mode.current --format=csv,noheader"),
+      context,
+    );
+    const pending = simulator.execute(
+      parse("nvidia-smi --query-gpu=ecc.mode.pending --format=csv,noheader"),
+      context,
+    );
+
+    expect(current.output.trim()).toBe("Enabled");
+    expect(pending.output.trim()).toBe("Disabled");
+  });
+
+  it("treats a GPU with no staged change as having pending equal to current", () => {
+    buildGpuState({ eccEnabled: true });
+
+    const pending = simulator.execute(
+      parse("nvidia-smi --query-gpu=ecc.mode.pending --format=csv,noheader"),
+      context,
+    );
+
+    expect(pending.output.trim()).toBe("Enabled");
+  });
+
+  it("promotes the pending mode to current on --gpu-reset", () => {
+    const { updateGPU } = buildGpuState({
+      eccEnabled: true,
+      eccModePending: false,
+    });
+
+    const result = simulator.execute(
+      parse("nvidia-smi --gpu-reset -i 0"),
+      context,
+    );
+
+    expect(result.exitCode).toBe(0);
+    const applied = updateGPU.mock.calls[0][2] as Record<string, unknown>;
+    expect(applied.eccEnabled).toBe(false);
+    expect(applied.eccModePending).toBeUndefined();
+  });
+});
